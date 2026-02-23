@@ -1,6 +1,8 @@
 package com.busco.localizacao_core_service.infra.firebase;
 
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.database.*;
+import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -8,13 +10,22 @@ import java.util.Map;
 @Component
 public class FirebaseMotoristaListener {
 
+    private final FirebaseTrackingListener trackingListener;
+    private final FirebaseApp firebaseApp;
+
+
     public FirebaseMotoristaListener(
-            FirebaseTrackingListener trackingListener
+            FirebaseTrackingListener trackingListener, FirebaseApp firebaseApp
     ) {
+        this.trackingListener = trackingListener;
+        this.firebaseApp = firebaseApp;
+    }
+
+    @PostConstruct
+    public void init() {
 
         DatabaseReference ref =
-                FirebaseDatabase
-                        .getInstance()
+                FirebaseDatabase.getInstance(firebaseApp)
                         .getReference("viagens");
 
         ref.addChildEventListener(new ChildEventListener() {

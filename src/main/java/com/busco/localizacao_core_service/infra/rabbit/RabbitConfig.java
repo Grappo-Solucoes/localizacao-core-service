@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class RabbitConfig {
 
-    public static final String EXCHANGE = "tracking.exchange";
+    public static final String EXCHANGE = "location.exchange";
 
     @Bean
     public TopicExchange trackingExchange() {

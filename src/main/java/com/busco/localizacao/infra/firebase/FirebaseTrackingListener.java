@@ -1,6 +1,7 @@
 package com.busco.localizacao.infra.firebase;
 
 import com.busco.localizacao.domain.services.TrackingDomainService;
+import com.busco.localizacao.domain.services.TrackingOrchestratorService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
@@ -11,12 +12,12 @@ public class FirebaseTrackingListener {
 
     private final ObjectMapper mapper;
     private final FirebaseTimestampParser parser;
-    private final TrackingDomainService domainService;
+    private final TrackingOrchestratorService domainService;
 
     public FirebaseTrackingListener(
             ObjectMapper mapper,
             FirebaseTimestampParser parser,
-            TrackingDomainService domainService
+            TrackingOrchestratorService domainService
     ) {
         this.mapper = mapper;
         this.parser = parser;
@@ -38,7 +39,10 @@ public class FirebaseTrackingListener {
                 viagemId,
                 dto.getLatitude(),
                 dto.getLongitude(),
-                timestamp
+                timestamp,
+                dto.getBatteryLevel(),
+                dto.getAccuracy(),
+                dto.getProvider()
         ).subscribe();
     }
 

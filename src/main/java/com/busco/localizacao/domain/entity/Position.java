@@ -19,6 +19,14 @@ public class Position {
         this.timestamp = timestamp;
     }
 
+    public Position(
+            GeoPoint point,
+            long timestamp
+    ) {
+        this.point = point;
+        this.speed = 0;
+        this.timestamp = timestamp;
+    }
     public GeoPoint getPoint() { return point; }
     public double getSpeed() { return speed; }
     public long getTimestamp() { return timestamp; }

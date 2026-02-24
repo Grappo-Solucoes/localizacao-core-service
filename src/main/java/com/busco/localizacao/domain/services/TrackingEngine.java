@@ -6,6 +6,8 @@ import com.busco.localizacao.infra.redis.TrackingStateRepository;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
+import java.util.Optional;
+
 @Service
 public class TrackingEngine {
 
@@ -124,5 +126,11 @@ public class TrackingEngine {
                                 timestamp
                         )
                 );
+    }
+
+    public Mono<Optional<TrackingState>> getLastPosition(String key) {
+        return repository.find(key)
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty());
     }
 }

@@ -2,7 +2,6 @@ package com.busco.localizacao.domain.services;
 
 import com.busco.localizacao.domain.entity.PontoEmbarque;
 import com.busco.localizacao.domain.entity.PontoRota;
-import com.busco.localizacao.domain.entity.RotaViagem;
 import com.busco.localizacao.infra.redis.AlunoEmbarqueRedisRepository;
 import com.busco.localizacao.infra.redis.RotaRedisRepository;
 import org.springframework.stereotype.Service;
@@ -27,13 +26,6 @@ public class RotaIntegrationService {
         this.rotaRedisRepository = rotaRedisRepository;
         this.alunoEmbarqueRedisRepository = alunoEmbarqueRedisRepository;
         this.geofencingService = geofencingService;
-    }
-
-    /**
-     * Carrega rota da viagem do Redis
-     */
-    public Mono<RotaViagem> carregarRota(String viagemId) {
-        return rotaRedisRepository.buscarRota(viagemId);
     }
 
     /**

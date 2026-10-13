@@ -6,11 +6,15 @@ import com.busco.localizacao.domain.events.ViagemPosicaoAtualizadaEvent;
 import com.busco.localizacao.domain.vo.GeoPoint;
 import com.busco.localizacao.infra.redis.AlunoEmbarqueRedisRepository;
 import com.busco.localizacao.infra.redis.RotaRedisRepository;
+import com.busco.localizacao.infra.ws.VisaoGeralSnapshotPublisher;
+import com.busco.localizacao.domain.vo.VisaoGeral;
+import com.busco.localizacao.domain.vo.Painel;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.function.Tuple4;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -30,6 +34,7 @@ public class TrackingOrchestratorService {
     private final TrackingConsistencyService consistencyService;
     private final RotaRedisRepository rotaRedisRepository;
     private final AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository;
+    private final VisaoGeralSnapshotPublisher visaoGeralSnapshotPublisher;
 
     public TrackingOrchestratorService(
             TrackingEngine trackingEngine,
@@ -43,7 +48,8 @@ public class TrackingOrchestratorService {
             TrackingAntiFraudService antiFraudService,
             TrackingConsistencyService consistencyService,
             RotaRedisRepository rotaRedisRepository,
-            AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository) {
+            AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository,
+            VisaoGeralSnapshotPublisher visaoGeralSnapshotPublisher) {
         this.trackingEngine = trackingEngine;
         this.eventPublisher = eventPublisher;
         this.geocodingService = geocodingService;
@@ -56,6 +62,7 @@ public class TrackingOrchestratorService {
         this.consistencyService = consistencyService;
         this.rotaRedisRepository = rotaRedisRepository;
         this.alunoEmbarqueRedisRepository = alunoEmbarqueRedisRepository;
+        this.visaoGeralSnapshotPublisher = visaoGeralSnapshotPublisher;
     }
 
     /**
@@ -151,19 +158,30 @@ public class TrackingOrchestratorService {
                                             );
 
                                             if (stop != null) {
-                                                event.status = stop.getStopType();
+                                                event = rebuildEventWithStop(event, stop.getStopType());
 //                                                event.addMetadata("stopDuration", stop.getDurationMinutes());
                                             }
 
                                             // Verifica se chegou em algum ponto
                                             verificarChegadaEmPonto(viagemId, pontosRota, alunos, lat, lng, timestamp)
-                                                    .subscribe(alunosNoPonto -> {
+                                                   .subscribe(alunosNoPonto -> {
                                                         if (!alunosNoPonto.isEmpty()) {
 //                                                            event.addMetadata("alunosNoPonto", alunosNoPonto);
                                                         }
                                                     });
 
-                                            return eventPublisher.publish(event);
+                                            return eventPublisher.publish(event)
+                                                    .doOnSuccess(v -> {
+                                                        // Publica snapshot no STOMP para Visão ao Vivo
+                                                        try {
+                                                            visaoGeralSnapshotPublisher.send(new com.busco.localizacao.domain.vo.VisaoGeral(
+                                                                    com.busco.localizacao.domain.vo.Painel.of(0, 0, 0),
+                                                                    new java.util.ArrayList<>()
+                                                            ));
+                                                        } catch (Exception ex) {
+                                                            // Não falha o pipeline se STOMP não estiver disponível
+                                                        }
+                                                    });
                                         });
                             });
                 });
@@ -191,12 +209,12 @@ public class TrackingOrchestratorService {
             Optional<TrackingState> optViagem = tuple.getT2();
             PontoEmbarque pontoEmbarque = tuple.getT3();
 
-            AlunoPosicaoAtualizadaEvent event = new AlunoPosicaoAtualizadaEvent();
-            event.alunoId = alunoId;
-            event.viagemId = viagemId;
-            event.latitude = resultAluno.latitude();
-            event.longitude = resultAluno.longitude();
-            event.timestamp = resultAluno.timestamp();
+            AlunoPosicaoAtualizadaEvent.Builder eventBuilder = AlunoPosicaoAtualizadaEvent.builder()
+                    .alunoId(alunoId)
+                    .viagemId(viagemId)
+                    .latitude(resultAluno.latitude())
+                    .longitude(resultAluno.longitude())
+                    .timestamp(resultAluno.timestamp());
 
             // Se tem posição do ônibus, calcula distância
             if (optViagem.isPresent()) {
@@ -205,12 +223,12 @@ public class TrackingOrchestratorService {
                         lat, lng,
                         viagem.getLastLat(), viagem.getLastLng()
                 );
-                event.distanciaDoOnibus = distancia / 1000; // converte para km
+                eventBuilder.distanciaDoOnibus(distancia / 1000); // converte para km
 
                 // Calcula ETA baseado na velocidade do ônibus
                 if (viagem.getLastSpeed() > 0) {
                     double etaHoras = (distancia / 1000) / viagem.getLastSpeed();
-                    event.etaParaEmbarque = (long) (etaHoras * 3600);
+                    eventBuilder.etaParaEmbarque((long) (etaHoras * 3600));
                 }
             }
 
@@ -221,30 +239,31 @@ public class TrackingOrchestratorService {
                         pontoEmbarque.getLatitude(), pontoEmbarque.getLongitude()
                 );
 
-                event.aptoParaEmbarque = distanciaAtePonto < 100; // menos de 100m
-                event.pontoEmbarqueId = pontoEmbarque.getPontoId();
-                event.tipoEmbarque = pontoEmbarque.getTipo().toString();
-                event.distanciaAtePonto = distanciaAtePonto;
+                eventBuilder.aptoParaEmbarque(distanciaAtePonto < 100) // menos de 100m
+                        .pontoEmbarqueId(pontoEmbarque.getPontoId())
+                        .tipoEmbarque(pontoEmbarque.getTipo().toString())
+                        .distanciaAtePonto(distanciaAtePonto);
 
                 // Se está no ponto e o ônibus está próximo, pode embarcar
-                if (event.aptoParaEmbarque && optViagem.isPresent()) {
+                if (distanciaAtePonto < 100 && optViagem.isPresent()) {
                     double distanciaOnibus = calcularDistancia(
                             lat, lng,
                             optViagem.get().getLastLat(), optViagem.get().getLastLng()
                     );
 
                     if (distanciaOnibus < 200) { // Ônibus a menos de 200m
-                        event.status = "ONIBUS_PROXIMO";
+                        eventBuilder.status("ONIBUS_PROXIMO");
                     } else {
-                        event.status = "AGUARDANDO_ONIBUS";
+                        eventBuilder.status("AGUARDANDO_ONIBUS");
                     }
                 } else {
-                    event.status = event.aptoParaEmbarque ? "NO_PONTO" : "FORA_DO_PONTO";
+                    eventBuilder.status(distanciaAtePonto < 100 ? "NO_PONTO" : "FORA_DO_PONTO");
                 }
             } else {
-                event.status = "SEM_PONTO_DEFINIDO";
+                eventBuilder.status("SEM_PONTO_DEFINIDO");
             }
 
+            AlunoPosicaoAtualizadaEvent event = eventBuilder.build();
             return eventPublisher.publishAluno(event);
         });
     }
@@ -367,53 +386,61 @@ public class TrackingOrchestratorService {
             String provedor,
             PontoRota proximoPonto
     ) {
-        ViagemPosicaoAtualizadaEvent event = new ViagemPosicaoAtualizadaEvent();
-
-        event.viagemId = viagemId;
-        event.latitude = result.latitude();
-        event.longitude = result.longitude();
-        event.timestamp = result.timestamp();
-        event.velocidade = result.speed();
-        event.endereco = tuple.getT1();
-        event.distanciaParaDestino = tuple.getT2().distance();
-        event.etaSegundos = tuple.getT2().etaSeconds();
-        event.accuracy = accuracy;
-        event.provedor = provedor;
-        event.bateria = batteryConfig != null ? batteryConfig.batteryLevel() : null;
+        ViagemPosicaoAtualizadaEvent.Builder eventBuilder = ViagemPosicaoAtualizadaEvent.builder()
+                .viagemId(viagemId)
+                .latitude(result.latitude())
+                .longitude(result.longitude())
+                .timestamp(result.timestamp())
+                .velocidade(result.speed())
+                .endereco(tuple.getT1())
+                .distanciaParaDestino(tuple.getT2().distance())
+                .etaSegundos(tuple.getT2().etaSeconds())
+                .accuracy(accuracy)
+                .provedor(provedor)
+                .bateria(batteryConfig != null ? batteryConfig.batteryLevel() : null);
 
         // Informações do próximo ponto
         if (proximoPonto != null) {
-            event.proximoPontoId = proximoPonto.getId();
-            event.proximoPontoNome = proximoPonto.getNome();
-            event.proximoPontoTipo = proximoPonto.getTipo().toString();
+            eventBuilder.proximoPontoId(proximoPonto.getId())
+                    .proximoPontoNome(proximoPonto.getNome())
+                    .proximoPontoTipo(proximoPonto.getTipo().toString());
         }
-
-        // Adiciona metadados
-//        if (batteryConfig != null) {
-//            event.addMetadata("recommendedInterval", batteryConfig.updateIntervalMs());
-//            event.addMetadata("significantMove", batteryConfig.significantMoveMeters());
-//        }
-
-//        tuple.getT3().ifPresent(prediction -> {
-//            event.addMetadata("nextLat", prediction.lat());
-//            event.addMetadata("nextLng", prediction.lng());
-//            event.addMetadata("nextEta", prediction.timestamp() - result.timestamp());
-//        });
-//
-//        if (!tuple.getT4().isEmpty()) {
-//            event.addMetadata("proximaZona", tuple.getT4());
-//        }
 
         // Determina status
         if (result.speed() < 1) {
-            event.status = "PARADO";
+            eventBuilder.status("PARADO");
         } else if (result.speed() < 10) {
-            event.status = "DEVAGAR";
+            eventBuilder.status("DEVAGAR");
         } else {
-            event.status = "EM_ROTA";
+            eventBuilder.status("EM_ROTA");
         }
 
-        return event;
+        return eventBuilder.build();
+    }
+
+    /**
+     * Recria o evento com novo status (imutabilidade)
+     */
+    private ViagemPosicaoAtualizadaEvent rebuildEventWithStop(ViagemPosicaoAtualizadaEvent event, String newStatus) {
+        return ViagemPosicaoAtualizadaEvent.builder()
+                .viagemId(event.getViagemId())
+                .latitude(event.getLatitude())
+                .longitude(event.getLongitude())
+                .timestamp(event.getTimestamp())
+                .velocidade(event.getVelocidade())
+                .endereco(event.getEndereco())
+                .distanciaParaDestino(event.getDistanciaParaDestino())
+                .etaSegundos(event.getEtaSegundos())
+                .status(newStatus)
+                .accuracy(event.getAccuracy())
+                .provedor(event.getProvedor())
+                .bateria(event.getBateria())
+                .proximoPontoId(event.getProximoPontoId())
+                .proximoPontoNome(event.getProximoPontoNome())
+                .proximoPontoDistancia(event.getProximoPontoDistancia())
+                .proximoPontoETA(event.getProximoPontoETA())
+                .proximoPontoTipo(event.getProximoPontoTipo())
+                .build();
     }
 
     /**

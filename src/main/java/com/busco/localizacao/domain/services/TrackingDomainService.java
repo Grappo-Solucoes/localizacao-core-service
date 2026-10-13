@@ -49,23 +49,14 @@ public class TrackingDomainService {
                 )
                 .flatMap(result -> {
 
-                    ViagemPosicaoAtualizadaEvent event =
-                            new ViagemPosicaoAtualizadaEvent();
+                    ViagemPosicaoAtualizadaEvent.Builder eventBuilder =
+                            new ViagemPosicaoAtualizadaEvent.Builder()
+                                    .viagemId(viagemId)
+                                    .latitude(result.latitude())
+                                    .longitude(result.longitude())
+                                    .timestamp(result.timestamp())
+                                    .velocidade(result.speed());
 
-                    event.viagemId = viagemId;
-                    event.latitude = result.latitude();
-                    event.longitude = result.longitude();
-                    event.timestamp = result.timestamp();
-                    event.velocidade = result.speed();
-//                    if (batteryLevel != null) {
-//                        var config = batteryOptimizationService.getConfigForEntity(
-//                                viagemId, batteryLevel
-//                        );
-//                        event.metadata = Map.of(
-//                                "recommendedInterval", config.updateIntervalMs(),
-//                                "batteryLevel", batteryLevel
-//                        );
-//                    }
                     return Mono.zip(
                             geocodingService.reverseGeocode(lat, lng),
                             destinoLat != null && destinoLng != null ?
@@ -75,9 +66,9 @@ public class TrackingDomainService {
                                     .map(Mono::just)
                                     .orElse(Mono.empty())
                     ).flatMap(tuple -> {
-                        event.endereco = tuple.getT1();
-                        event.distanciaParaDestino = tuple.getT2().distance();
-                        event.etaSegundos = tuple.getT2().etaSeconds();
+                        eventBuilder.endereco(tuple.getT1())
+                                .distanciaParaDestino(tuple.getT2().distance())
+                                .etaSegundos(tuple.getT2().etaSeconds());
 
                         // Detecta paradas
                         StopInfo stop = stopDetectionService.checkStop(
@@ -85,11 +76,10 @@ public class TrackingDomainService {
                         );
 
                         if (stop != null) {
-                            event.status = "PARADO";
-                            // Publica evento de parada também
+                            eventBuilder.status("PARADO");
                         }
 
-                        return publisher.publish(event);
+                        return publisher.publish(eventBuilder.build());
                     });
 
                 });
@@ -113,13 +103,13 @@ public class TrackingDomainService {
                 .flatMap(result -> {
 
                     AlunoPosicaoAtualizadaEvent event =
-                            new AlunoPosicaoAtualizadaEvent();
-
-                    event.alunoId = alunoId;
-                    event.viagemId = viagemId;
-                    event.latitude = result.latitude();
-                    event.longitude = result.longitude();
-                    event.timestamp = result.timestamp();
+                            new AlunoPosicaoAtualizadaEvent.Builder()
+                                    .alunoId(alunoId)
+                                    .viagemId(viagemId)
+                                    .latitude(result.latitude())
+                                    .longitude(result.longitude())
+                                    .timestamp(result.timestamp())
+                                    .build();
 
                     return publisher.publishAluno(event);
                 });

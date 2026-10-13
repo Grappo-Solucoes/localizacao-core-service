@@ -38,22 +38,6 @@ public class RedisReactiveConfig {
     }
 
     @Bean
-    public ReactiveRedisTemplate<String, RotaViagem> rotaViagemRedisTemplate(
-            ReactiveRedisConnectionFactory factory) {
-
-        Jackson2JsonRedisSerializer<RotaViagem> serializer =
-                new Jackson2JsonRedisSerializer<>(objectMapper, RotaViagem.class);
-
-        RedisSerializationContext<String, RotaViagem> context =
-                RedisSerializationContext
-                        .<String, RotaViagem>newSerializationContext(new StringRedisSerializer())
-                        .value(serializer)
-                        .build();
-
-        return new ReactiveRedisTemplate<>(factory, context);
-    }
-
-    @Bean
     public ReactiveRedisTemplate<String, List<PontoRota>> pontosRotaRedisTemplate(
             ReactiveRedisConnectionFactory factory) {
 

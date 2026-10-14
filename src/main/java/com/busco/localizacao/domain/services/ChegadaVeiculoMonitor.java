@@ -19,6 +19,7 @@ public class ChegadaVeiculoMonitor {
 
     private final PontoEmbarqueRepository pontoEmbarqueRepository;
     private final TrackingEventPublisher eventPublisher;
+    private final GeofencingService geofencingService;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "chegada-veiculo-ttl");
@@ -36,9 +37,11 @@ public class ChegadaVeiculoMonitor {
 
     public ChegadaVeiculoMonitor(
             PontoEmbarqueRepository pontoEmbarqueRepository,
-            TrackingEventPublisher eventPublisher) {
+            TrackingEventPublisher eventPublisher,
+            GeofencingService geofencingService) {
         this.pontoEmbarqueRepository = pontoEmbarqueRepository;
         this.eventPublisher = eventPublisher;
+        this.geofencingService = geofencingService;
     }
 
     public void iniciarMonitoramento(String viagemId) {
@@ -63,6 +66,11 @@ public class ChegadaVeiculoMonitor {
             monitor.destruir();
             log.info("Monitoramento de chegada encerrado para a viagem {}", viagemId);
         }
+        // Fim da viagem: descarta as zonas de geofence registradas para ela. Fora do if
+        // porque as posicoes podem ter registrado zonas sem `iniciarMonitoramento`. O
+        // registro e refeito a cada posicao, entao isso nao desliga o geofence de viagem
+        // ativa e evita crescimento indefinido do mapa.
+        geofencingService.removerZonasDaViagem(viagemId);
     }
 
     public void processarPosicaoVeiculo(String viagemId, double lat, double lng) {
@@ -121,10 +129,10 @@ public class ChegadaVeiculoMonitor {
 
         private void agendarTtl() {
             ttlTask = scheduler.schedule(() -> {
-                if (monitoresAtivos.remove(viagemId) != null) {
-                    destruir();
+                if (monitoresAtivos.containsKey(viagemId)) {
                     log.warn("Monitoramento de chegada para a viagem {} encerrado por TTL ({} min)",
                             viagemId, ttlMinutos);
+                    encerrarMonitoramento(viagemId);
                 }
             }, ttlMinutos, TimeUnit.MINUTES);
         }

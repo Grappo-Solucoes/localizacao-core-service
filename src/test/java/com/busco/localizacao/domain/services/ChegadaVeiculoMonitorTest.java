@@ -19,15 +19,17 @@ class ChegadaVeiculoMonitorTest {
 
     private PontoEmbarqueRepository pontoEmbarqueRepository;
     private TrackingEventPublisher eventPublisher;
+    private GeofencingService geofencingService;
     private ChegadaVeiculoMonitor monitor;
 
     @BeforeEach
     void setUp() {
         pontoEmbarqueRepository = mock(PontoEmbarqueRepository.class);
         eventPublisher = mock(TrackingEventPublisher.class);
+        geofencingService = new GeofencingService();
         when(eventPublisher.publishChegada(any())).thenReturn(Mono.empty());
 
-        monitor = new ChegadaVeiculoMonitor(pontoEmbarqueRepository, eventPublisher);
+        monitor = new ChegadaVeiculoMonitor(pontoEmbarqueRepository, eventPublisher, geofencingService);
         ReflectionTestUtils.setField(monitor, "raioChegadaMetros", 300.0);
         ReflectionTestUtils.setField(monitor, "ttlMinutos", 120L);
     }
@@ -35,6 +37,27 @@ class ChegadaVeiculoMonitorTest {
     private static PontoEmbarque ponto(String alunoId, double lat, double lng) {
         return new PontoEmbarque(alunoId, "ponto-" + alunoId, lat, lng,
                 PontoEmbarque.TipoEmbarque.EMBARQUE);
+    }
+
+    @Test
+    void encerrarMonitoramentoDescartaSomenteAsZonasDessaViagem() {
+        String zonaViagem1 = GeofencingService.zoneIdPontoRota("viagem-1", "ponto-1");
+        String zonaEmbarqueViagem1 = GeofencingService.zoneIdPontoEmbarque(
+                "viagem-1", "aluno-1", PontoEmbarque.TipoEmbarque.EMBARQUE);
+        String zonaViagem2 = GeofencingService.zoneIdPontoRota("viagem-2", "ponto-2");
+        geofencingService.registerZone(zonaViagem1, -23.55, -46.63, 100);
+        geofencingService.registerZone(zonaEmbarqueViagem1, -23.55, -46.63, 50);
+        geofencingService.registerZone(zonaViagem2, -23.55, -46.63, 100);
+
+        // sem monitor aberto tambem limpa (posicoes registram zonas sem iniciarMonitoramento)
+        monitor.encerrarMonitoramento("viagem-1");
+
+        assertTrue(geofencingService.checkPosition("viagem-1", -23.55, -46.63, zonaViagem1)
+                .blockOptional().isEmpty());
+        assertTrue(geofencingService.checkPosition("viagem-1", -23.55, -46.63, zonaEmbarqueViagem1)
+                .blockOptional().isEmpty());
+        assertTrue(geofencingService.checkPosition("viagem-2", -23.55, -46.63, zonaViagem2)
+                .blockOptional().isPresent());
     }
 
     @Test

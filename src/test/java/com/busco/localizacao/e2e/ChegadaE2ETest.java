@@ -4,6 +4,7 @@ import com.busco.localizacao.domain.entity.PontoEmbarque;
 import com.busco.localizacao.domain.events.ViagemChegadaEvent;
 import com.busco.localizacao.domain.repository.PontoEmbarqueRepository;
 import com.busco.localizacao.domain.services.ChegadaVeiculoMonitor;
+import com.busco.localizacao.domain.services.GeofencingService;
 import com.busco.localizacao.domain.services.TrackingEventPublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,7 +41,8 @@ class ChegadaE2ETest {
         eventPublisher = mock(TrackingEventPublisher.class);
         when(eventPublisher.publishChegada(any())).thenReturn(Mono.empty());
 
-        monitor = new ChegadaVeiculoMonitor(pontoEmbarqueRepository, eventPublisher);
+        monitor = new ChegadaVeiculoMonitor(
+                pontoEmbarqueRepository, eventPublisher, new GeofencingService());
         ReflectionTestUtils.setField(monitor, "raioChegadaMetros", 300.0);
         ReflectionTestUtils.setField(monitor, "ttlMinutos", 120L);
     }

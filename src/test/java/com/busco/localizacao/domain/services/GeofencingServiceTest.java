@@ -1,6 +1,7 @@
 package com.busco.localizacao.domain.services;
 
 import com.busco.localizacao.domain.entity.GeofenceEvent;
+import com.busco.localizacao.domain.entity.PontoEmbarque;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -61,5 +62,28 @@ class GeofencingServiceTest {
                     assertTrue(event.getDistanceToCenter() <= 300);
                 })
                 .verifyComplete();
+    }
+
+    @Test
+    void removeZonasSomenteDaViagemIndicada() {
+        String pontoViagem1 = GeofencingService.zoneIdPontoRota("viagem-1", "ponto-1");
+        String embarqueViagem1 = GeofencingService.zoneIdPontoEmbarque(
+                "viagem-1", "aluno-1", PontoEmbarque.TipoEmbarque.EMBARQUE);
+        String pontoViagem2 = GeofencingService.zoneIdPontoRota("viagem-2", "ponto-2");
+        // viagem-1 e prefixo de viagem-10: a remocao nao pode atingir a outra viagem
+        String pontoViagem10 = GeofencingService.zoneIdPontoRota("viagem-10", "ponto-10");
+        service.registerZone(pontoViagem1, -23.55, -46.63, 100);
+        service.registerZone(embarqueViagem1, -23.55, -46.63, 50);
+        service.registerZone(pontoViagem2, -23.55, -46.63, 100);
+        service.registerZone(pontoViagem10, -23.55, -46.63, 100);
+
+        service.removerZonasDaViagem("viagem-1");
+
+        StepVerifier.create(service.checkPosition("e", -23.55, -46.63, pontoViagem1)).verifyComplete();
+        StepVerifier.create(service.checkPosition("e", -23.55, -46.63, embarqueViagem1)).verifyComplete();
+        StepVerifier.create(service.checkPosition("e", -23.55, -46.63, pontoViagem2))
+                .assertNext(event -> assertTrue(event.isInside())).verifyComplete();
+        StepVerifier.create(service.checkPosition("e", -23.55, -46.63, pontoViagem10))
+                .assertNext(event -> assertTrue(event.isInside())).verifyComplete();
     }
 }

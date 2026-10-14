@@ -19,7 +19,7 @@ public class GeofencingService {
      * consulta precisam concordar exatamente, senao a consulta nunca encontra a zona.
      */
     public static String zoneIdPontoRota(String viagemId, String pontoId) {
-        return "ponto:" + viagemId + ":" + pontoId;
+        return prefixoZonasPontoRota(viagemId) + pontoId;
     }
 
     /**
@@ -27,7 +27,26 @@ public class GeofencingService {
      */
     public static String zoneIdPontoEmbarque(
             String viagemId, String alunoId, PontoEmbarque.TipoEmbarque tipo) {
-        return "aluno:" + viagemId + ":" + alunoId + ":" + tipo;
+        return prefixoZonasPontoEmbarque(viagemId) + alunoId + ":" + tipo;
+    }
+
+    /**
+     * Descarta as zonas registradas para uma viagem. O registro e refeito a cada posicao
+     * processada, entao limpar no fim da viagem nao desliga o geofence de uma viagem ativa
+     * e limita o crescimento do mapa.
+     */
+    public void removerZonasDaViagem(String viagemId) {
+        String prefixoPonto = prefixoZonasPontoRota(viagemId);
+        String prefixoAluno = prefixoZonasPontoEmbarque(viagemId);
+        zones.keySet().removeIf(id -> id.startsWith(prefixoPonto) || id.startsWith(prefixoAluno));
+    }
+
+    private static String prefixoZonasPontoRota(String viagemId) {
+        return "ponto:" + viagemId + ":";
+    }
+
+    private static String prefixoZonasPontoEmbarque(String viagemId) {
+        return "aluno:" + viagemId + ":";
     }
 
     public void registerZone(String zoneId, double centerLat, double centerLng, double radiusMeters) {

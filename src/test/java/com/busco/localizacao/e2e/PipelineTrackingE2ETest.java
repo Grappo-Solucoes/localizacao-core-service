@@ -150,6 +150,28 @@ class PipelineTrackingE2ETest {
     }
 
     @Test
+    void posicaoSemCamposOpcionais_publicaEventoComCamposNulos() {
+        // Spec localizacao/streaming ("Campos opcionais ausentes no evento"): posicao sem bateria,
+        // precisao e provedor e processada normalmente, o evento sai com os tres nulos e o resto do
+        // enriquecimento (endereco, proximo ponto, status) continua intacto.
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.5505, -46.6333, 1_700_000_000_000L, null, null, null
+        ).block();
+
+        ArgumentCaptor<ViagemPosicaoAtualizadaEvent> captor =
+                ArgumentCaptor.forClass(ViagemPosicaoAtualizadaEvent.class);
+        verify(eventPublisher).publish(captor.capture());
+
+        ViagemPosicaoAtualizadaEvent evento = captor.getValue();
+        assertNull(evento.getBateria());
+        assertNull(evento.getAccuracy());
+        assertNull(evento.getProvedor());
+        assertEquals("Rua Teste, 100", evento.getEndereco());
+        assertEquals("ponto-1", evento.getProximoPontoId());
+        assertEquals("PARADO", evento.getStatus());
+    }
+
+    @Test
     void pipelineCompleto_estadoPersistidoNoTrackingEngine() {
         orchestrator.processMotorista(
                 VIAGEM_ID, -23.5505, -46.6333, 1_700_000_000_000L, null, null, null

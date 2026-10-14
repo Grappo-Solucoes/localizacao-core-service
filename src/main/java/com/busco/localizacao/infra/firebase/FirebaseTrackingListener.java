@@ -1,6 +1,5 @@
 package com.busco.localizacao.infra.firebase;
 
-import com.busco.localizacao.domain.services.TrackingDomainService;
 import com.busco.localizacao.domain.services.TrackingOrchestratorService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;

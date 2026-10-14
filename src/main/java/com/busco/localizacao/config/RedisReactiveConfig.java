@@ -46,6 +46,20 @@ public class RedisReactiveConfig {
     }
 
     @Bean
+    public ReactiveRedisTemplate<String, String> eventoProcessadoRedisTemplate(
+            ReactiveRedisConnectionFactory factory) {
+
+        // Marcador de idempotencia do consumo Kafka: chave e valor sao texto simples.
+        RedisSerializationContext<String, String> context =
+                RedisSerializationContext
+                        .<String, String>newSerializationContext(new StringRedisSerializer())
+                        .value(new StringRedisSerializer())
+                        .build();
+
+        return new ReactiveRedisTemplate<>(factory, context);
+    }
+
+    @Bean
     public ReactiveRedisTemplate<String, TrackingState> trackingStateRedisTemplate(
             ReactiveRedisConnectionFactory factory) {
 

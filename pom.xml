@@ -40,6 +40,12 @@
 			<version>9.2.0</version>
 		</dependency>
 
+		<!-- Kafka: entrada do stream de posicoes do tracking-ingestion-service -->
+		<dependency>
+			<groupId>org.springframework.kafka</groupId>
+			<artifactId>spring-kafka</artifactId>
+		</dependency>
+
 		<!-- Redis Reactive -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

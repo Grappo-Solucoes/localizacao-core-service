@@ -1,20 +1,21 @@
 package com.busco.localizacao.domain.repository;
 
-import com.busco.localizacao.infra.jpa.PontoRotaEntity;
+import com.busco.localizacao.domain.entity.PontoRota;
 
 import java.util.List;
 import java.util.Optional;
 
 /**
  * Interface de repositório de PontoRota no domínio.
+ * Usa a entidade de domínio (PontoRota), não a entidade JPA.
  */
 public interface PontoRotaRepository {
 
-    Optional<PontoRotaEntity> findById(String id);
+    Optional<PontoRota> findById(String id);
 
-    List<PontoRotaEntity> findByViagemIdOrderByOrdem(String viagemId);
+    List<PontoRota> findByViagemIdOrderByOrdem(String viagemId);
 
-    PontoRotaEntity save(PontoRotaEntity entity);
+    PontoRota save(PontoRota ponto);
 
     void deleteById(String id);
 }

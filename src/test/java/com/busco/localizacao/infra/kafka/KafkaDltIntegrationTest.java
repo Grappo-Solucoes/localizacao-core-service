@@ -16,6 +16,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import reactor.core.publisher.Mono;
 
@@ -46,6 +48,15 @@ import static org.mockito.Mockito.when;
         "tracking.tentativas=1"
 })
 class KafkaDltIntegrationTest {
+
+    /** Topico proprio desta execucao: o DLT nao depende do historico de execucoes anteriores. */
+    private static final String TOPICO_VEICULO = "tracking.posicao-veiculo.dlt-it-" + UUID.randomUUID();
+
+    @DynamicPropertySource
+    static void entradaIsolada(DynamicPropertyRegistry registry) {
+        registry.add("tracking.topico-veiculo", () -> TOPICO_VEICULO);
+        registry.add("spring.kafka.consumer.group-id", () -> "localizacao-core-dlt-" + UUID.randomUUID());
+    }
 
     @Autowired
     private KafkaTemplate<String, Object> kafkaTemplate;

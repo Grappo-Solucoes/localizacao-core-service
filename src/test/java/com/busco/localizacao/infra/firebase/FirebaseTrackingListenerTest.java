@@ -10,6 +10,7 @@ import reactor.core.publisher.Mono;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.*;
@@ -138,5 +139,45 @@ class FirebaseTrackingListenerTest {
                 isNull(),
                 isNull()
         );
+    }
+
+    @Test
+    void onMotoristaEvent_timestampInvalido_descartaSemProcessar() {
+        // spec localizacao/streaming: payload sem timestamp valido e descartado
+        Map<String, Object> raw = new HashMap<>();
+        raw.put("latitude", -23.5505);
+        raw.put("longitude", -46.6333);
+        raw.put("timeStamp", "14/10/2026 10:30");
+
+        assertDoesNotThrow(() -> listener.onMotoristaEvent("viagem-1", raw));
+
+        verify(domainService, never()).processMotorista(
+                anyString(), anyDouble(), anyDouble(), anyLong(), any(), any(), any());
+    }
+
+    @Test
+    void onMotoristaEvent_payloadInvalido_descartaSemProcessar() {
+        Map<String, Object> raw = new HashMap<>();
+        raw.put("latitude", "nao-numero");
+        raw.put("longitude", -46.6333);
+        raw.put("timeStamp", "2026/10/14 10:30:00");
+
+        assertDoesNotThrow(() -> listener.onMotoristaEvent("viagem-1", raw));
+
+        verify(domainService, never()).processMotorista(
+                anyString(), anyDouble(), anyDouble(), anyLong(), any(), any(), any());
+    }
+
+    @Test
+    void onAlunoEvent_timestampInvalido_descartaSemProcessar() {
+        Map<String, Object> raw = new HashMap<>();
+        raw.put("latitude", -23.5505);
+        raw.put("longitude", -46.6333);
+        raw.put("timeStamp", "sem-timestamp");
+
+        assertDoesNotThrow(() -> listener.onAlunoEvent("viagem-1", "aluno-1", raw));
+
+        verify(domainService, never()).processAluno(
+                anyString(), anyString(), anyDouble(), anyDouble(), anyLong());
     }
 }

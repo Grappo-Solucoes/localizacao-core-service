@@ -3,12 +3,16 @@ package com.busco.localizacao.infra.firebase;
 import com.busco.localizacao.domain.services.TrackingDomainService;
 import com.busco.localizacao.domain.services.TrackingOrchestratorService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
 @Component
 public class FirebaseTrackingListener {
+
+    private static final Logger log = LoggerFactory.getLogger(FirebaseTrackingListener.class);
 
     private final ObjectMapper mapper;
     private final FirebaseTimestampParser parser;
@@ -29,11 +33,18 @@ public class FirebaseTrackingListener {
             Map<String, Object> raw
     ) {
 
-        FirebaseLocationDTO dto =
-                mapper.convertValue(raw, FirebaseLocationDTO.class);
-
-        long timestamp =
-                parser.parse(dto.getTimeStamp());
+        FirebaseLocationDTO dto;
+        long timestamp;
+        try {
+            dto = mapper.convertValue(raw, FirebaseLocationDTO.class);
+            timestamp = parser.parse(dto.getTimeStamp());
+        } catch (RuntimeException e) {
+            // Spec localizacao/streaming: payload sem timestamp valido e descartado com
+            // registro de erro, sem emitir evento (e sem derrubar o thread do listener).
+            log.warn("Posicao do motorista descartada (viagem {}): payload invalido: {}",
+                    viagemId, e.getMessage());
+            return;
+        }
 
         domainService.processMotorista(
                 viagemId,
@@ -43,7 +54,8 @@ public class FirebaseTrackingListener {
                 dto.getBatteryLevel(),
                 dto.getAccuracy(),
                 dto.getProvider()
-        ).subscribe();
+        ).subscribe(null, e -> log.warn("Falha ao processar posicao do motorista (viagem {}): {}",
+                viagemId, e.getMessage()));
     }
 
     public void onAlunoEvent(
@@ -52,11 +64,16 @@ public class FirebaseTrackingListener {
             Map<String, Object> raw
     ) {
 
-        FirebaseLocationDTO dto =
-                mapper.convertValue(raw, FirebaseLocationDTO.class);
-
-        long timestamp =
-                parser.parse(dto.getTimeStamp());
+        FirebaseLocationDTO dto;
+        long timestamp;
+        try {
+            dto = mapper.convertValue(raw, FirebaseLocationDTO.class);
+            timestamp = parser.parse(dto.getTimeStamp());
+        } catch (RuntimeException e) {
+            log.warn("Posicao do aluno {} descartada (viagem {}): payload invalido: {}",
+                    alunoId, viagemId, e.getMessage());
+            return;
+        }
 
         domainService.processAluno(
                 alunoId,
@@ -64,6 +81,7 @@ public class FirebaseTrackingListener {
                 dto.getLatitude(),
                 dto.getLongitude(),
                 timestamp
-        ).subscribe();
+        ).subscribe(null, e -> log.warn("Falha ao processar posicao do aluno {} (viagem {}): {}",
+                alunoId, viagemId, e.getMessage()));
     }
 }

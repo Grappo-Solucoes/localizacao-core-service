@@ -1,5 +1,6 @@
 package com.busco.localizacao.infra.ws;
 
+import com.busco.localizacao.domain.services.VisaoGeralPublisher;
 import com.busco.localizacao.domain.vo.Painel;
 import com.busco.localizacao.domain.vo.VisaoGeral;
 import org.slf4j.Logger;
@@ -14,11 +15,11 @@ public class VisaoGeralScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(VisaoGeralScheduler.class);
 
-    private final VisaoGeralSnapshotPublisher snapshotPublisher;
+    private final VisaoGeralPublisher snapshotPublisher;
     private final VisaoGeralTopicTracker topicTracker;
 
     public VisaoGeralScheduler(
-            VisaoGeralSnapshotPublisher snapshotPublisher,
+            VisaoGeralPublisher snapshotPublisher,
             VisaoGeralTopicTracker topicTracker) {
         this.snapshotPublisher = snapshotPublisher;
         this.topicTracker = topicTracker;

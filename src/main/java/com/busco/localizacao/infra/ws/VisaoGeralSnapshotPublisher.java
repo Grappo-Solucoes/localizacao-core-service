@@ -1,5 +1,6 @@
 package com.busco.localizacao.infra.ws;
 
+import com.busco.localizacao.domain.services.VisaoGeralPublisher;
 import com.busco.localizacao.domain.vo.VisaoGeral;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,7 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
-public class VisaoGeralSnapshotPublisher {
+public class VisaoGeralSnapshotPublisher implements VisaoGeralPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(VisaoGeralSnapshotPublisher.class);
 
@@ -36,6 +37,7 @@ public class VisaoGeralSnapshotPublisher {
     }
 
     @Async
+    @Override
     public void send(VisaoGeral visaoGeral) {
         send(visaoGeral, false);
     }

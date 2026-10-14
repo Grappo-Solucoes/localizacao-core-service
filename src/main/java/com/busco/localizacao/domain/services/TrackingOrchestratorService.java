@@ -6,7 +6,6 @@ import com.busco.localizacao.domain.events.ViagemPosicaoAtualizadaEvent;
 import com.busco.localizacao.domain.vo.GeoPoint;
 import com.busco.localizacao.infra.redis.AlunoEmbarqueRedisRepository;
 import com.busco.localizacao.infra.redis.RotaRedisRepository;
-import com.busco.localizacao.infra.ws.VisaoGeralSnapshotPublisher;
 import com.busco.localizacao.domain.vo.VisaoGeral;
 import com.busco.localizacao.domain.vo.Painel;
 import org.springframework.stereotype.Service;
@@ -34,7 +33,7 @@ public class TrackingOrchestratorService {
     private final TrackingConsistencyService consistencyService;
     private final RotaRedisRepository rotaRedisRepository;
     private final AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository;
-    private final VisaoGeralSnapshotPublisher visaoGeralSnapshotPublisher;
+    private final VisaoGeralPublisher visaoGeralSnapshotPublisher;
     private final ChegadaVeiculoMonitor chegadaVeiculoMonitor;
 
     public TrackingOrchestratorService(
@@ -50,7 +49,7 @@ public class TrackingOrchestratorService {
             TrackingConsistencyService consistencyService,
             RotaRedisRepository rotaRedisRepository,
             AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository,
-            VisaoGeralSnapshotPublisher visaoGeralSnapshotPublisher,
+            VisaoGeralPublisher visaoGeralSnapshotPublisher,
             ChegadaVeiculoMonitor chegadaVeiculoMonitor) {
         this.trackingEngine = trackingEngine;
         this.eventPublisher = eventPublisher;

@@ -1,8 +1,7 @@
 package com.busco.localizacao.domain.services;
 
-import com.busco.localizacao.domain.events.ViagemChegadaEvent;
-import com.busco.localizacao.infra.jpa.PontoEmbarqueEntity;
-import com.busco.localizacao.infra.jpa.PontoEmbarqueJpaRepository;
+import com.busco.localizacao.domain.entity.PontoEmbarque;
+import com.busco.localizacao.domain.repository.PontoEmbarqueRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -18,74 +17,65 @@ import static org.mockito.Mockito.*;
 
 class ChegadaVeiculoMonitorTest {
 
-    private PontoEmbarqueJpaRepository pontoEmbarqueJpaRepository;
+    private PontoEmbarqueRepository pontoEmbarqueRepository;
     private TrackingEventPublisher eventPublisher;
     private ChegadaVeiculoMonitor monitor;
 
     @BeforeEach
     void setUp() {
-        pontoEmbarqueJpaRepository = mock(PontoEmbarqueJpaRepository.class);
+        pontoEmbarqueRepository = mock(PontoEmbarqueRepository.class);
         eventPublisher = mock(TrackingEventPublisher.class);
         when(eventPublisher.publishChegada(any())).thenReturn(Mono.empty());
 
-        monitor = new ChegadaVeiculoMonitor(pontoEmbarqueJpaRepository, eventPublisher);
+        monitor = new ChegadaVeiculoMonitor(pontoEmbarqueRepository, eventPublisher);
         ReflectionTestUtils.setField(monitor, "raioChegadaMetros", 300.0);
         ReflectionTestUtils.setField(monitor, "ttlMinutos", 120L);
     }
 
+    private static PontoEmbarque ponto(String alunoId, double lat, double lng) {
+        return new PontoEmbarque(alunoId, "ponto-" + alunoId, lat, lng,
+                PontoEmbarque.TipoEmbarque.EMBARQUE);
+    }
+
     @Test
     void iniciaMonitoramentoComPontos() {
-        PontoEmbarqueEntity ponto = new PontoEmbarqueEntity();
-        ponto.setViagemId("viagem-1");
-        ponto.setAlunoId("aluno-1");
-        ponto.setLatitude(-23.5505);
-        ponto.setLongitude(-46.6333);
-        ponto.setRealizado(false);
-
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse("viagem-1"))
-                .thenReturn(Collections.singletonList(ponto));
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse("viagem-1"))
+                .thenReturn(Collections.singletonList(ponto("aluno-1", -23.5505, -46.6333)));
 
         monitor.iniciarMonitoramento("viagem-1");
 
-        verify(pontoEmbarqueJpaRepository).findByViagemIdAndRealizadoFalse("viagem-1");
+        verify(pontoEmbarqueRepository).findByViagemIdAndRealizadoFalse("viagem-1");
     }
 
     @Test
     void naoIniciaMonitoramentoSemPontos() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse("viagem-vazia"))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse("viagem-vazia"))
                 .thenReturn(Collections.emptyList());
 
         monitor.iniciarMonitoramento("viagem-vazia");
 
-        verify(pontoEmbarqueJpaRepository).findByViagemIdAndRealizadoFalse("viagem-vazia");
+        verify(pontoEmbarqueRepository).findByViagemIdAndRealizadoFalse("viagem-vazia");
     }
 
     @Test
     void naoIniciaMonitoramentoComPontosJaRealizados() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse("viagem-completa"))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse("viagem-completa"))
                 .thenReturn(Collections.emptyList());
 
         monitor.iniciarMonitoramento("viagem-completa");
 
-        verify(pontoEmbarqueJpaRepository).findByViagemIdAndRealizadoFalse("viagem-completa");
+        verify(pontoEmbarqueRepository).findByViagemIdAndRealizadoFalse("viagem-completa");
     }
 
     @Test
     void encerraMonitoramento() {
-        PontoEmbarqueEntity ponto = new PontoEmbarqueEntity();
-        ponto.setViagemId("viagem-2");
-        ponto.setAlunoId("aluno-2");
-        ponto.setLatitude(-23.5505);
-        ponto.setLongitude(-46.6333);
-        ponto.setRealizado(false);
-
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse("viagem-2"))
-                .thenReturn(Collections.singletonList(ponto));
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse("viagem-2"))
+                .thenReturn(Collections.singletonList(ponto("aluno-2", -23.5505, -46.6333)));
 
         monitor.iniciarMonitoramento("viagem-2");
         monitor.encerrarMonitoramento("viagem-2");
 
-        verify(pontoEmbarqueJpaRepository).findByViagemIdAndRealizadoFalse("viagem-2");
+        verify(pontoEmbarqueRepository).findByViagemIdAndRealizadoFalse("viagem-2");
     }
 
     @Test
@@ -98,26 +88,16 @@ class ChegadaVeiculoMonitorTest {
 
     @Test
     void unificaPontosPorCoordenada() {
-        PontoEmbarqueEntity ponto1 = new PontoEmbarqueEntity();
-        ponto1.setViagemId("viagem-3");
-        ponto1.setAlunoId("aluno-3");
-        ponto1.setLatitude(-23.5505);
-        ponto1.setLongitude(-46.6333);
-        ponto1.setRealizado(false);
+        List<PontoEmbarque> pontos = Arrays.asList(
+                ponto("aluno-3", -23.5505, -46.6333),
+                ponto("aluno-4", -23.5505, -46.6333));
 
-        PontoEmbarqueEntity ponto2 = new PontoEmbarqueEntity();
-        ponto2.setViagemId("viagem-3");
-        ponto2.setAlunoId("aluno-4");
-        ponto2.setLatitude(-23.5505);
-        ponto2.setLongitude(-46.6333);
-        ponto2.setRealizado(false);
-
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse("viagem-3"))
-                .thenReturn(Arrays.asList(ponto1, ponto2));
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse("viagem-3"))
+                .thenReturn(pontos);
 
         monitor.iniciarMonitoramento("viagem-3");
 
         // Deve unificar os dois pontos em uma única coordenada
-        verify(pontoEmbarqueJpaRepository).findByViagemIdAndRealizadoFalse("viagem-3");
+        verify(pontoEmbarqueRepository).findByViagemIdAndRealizadoFalse("viagem-3");
     }
 }

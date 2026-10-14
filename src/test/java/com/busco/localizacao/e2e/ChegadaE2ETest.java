@@ -1,10 +1,10 @@
 package com.busco.localizacao.e2e;
 
+import com.busco.localizacao.domain.entity.PontoEmbarque;
 import com.busco.localizacao.domain.events.ViagemChegadaEvent;
+import com.busco.localizacao.domain.repository.PontoEmbarqueRepository;
 import com.busco.localizacao.domain.services.ChegadaVeiculoMonitor;
 import com.busco.localizacao.domain.services.TrackingEventPublisher;
-import com.busco.localizacao.infra.jpa.PontoEmbarqueEntity;
-import com.busco.localizacao.infra.jpa.PontoEmbarqueJpaRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -30,46 +30,39 @@ class ChegadaE2ETest {
     private static final double PONTO_LAT = -23.5505;
     private static final double PONTO_LNG = -46.6333;
 
-    private PontoEmbarqueJpaRepository pontoEmbarqueJpaRepository;
+    private PontoEmbarqueRepository pontoEmbarqueRepository;
     private TrackingEventPublisher eventPublisher;
     private ChegadaVeiculoMonitor monitor;
 
     @BeforeEach
     void setUp() {
-        pontoEmbarqueJpaRepository = mock(PontoEmbarqueJpaRepository.class);
+        pontoEmbarqueRepository = mock(PontoEmbarqueRepository.class);
         eventPublisher = mock(TrackingEventPublisher.class);
         when(eventPublisher.publishChegada(any())).thenReturn(Mono.empty());
 
-        monitor = new ChegadaVeiculoMonitor(pontoEmbarqueJpaRepository, eventPublisher);
+        monitor = new ChegadaVeiculoMonitor(pontoEmbarqueRepository, eventPublisher);
         ReflectionTestUtils.setField(monitor, "raioChegadaMetros", 300.0);
         ReflectionTestUtils.setField(monitor, "ttlMinutos", 120L);
     }
 
-    private PontoEmbarqueEntity ponto(String alunoId, double lat, double lng) {
-        PontoEmbarqueEntity ponto = new PontoEmbarqueEntity();
-        ponto.setViagemId(VIAGEM_ID);
-        ponto.setAlunoId(alunoId);
-        ponto.setNome("Ponto " + alunoId);
-        ponto.setLatitude(lat);
-        ponto.setLongitude(lng);
-        ponto.setTipo("EMBARQUE");
-        ponto.setRealizado(false);
-        return ponto;
+    private PontoEmbarque ponto(String alunoId, double lat, double lng) {
+        return new PontoEmbarque(alunoId, "ponto-" + alunoId, lat, lng,
+                PontoEmbarque.TipoEmbarque.EMBARQUE);
     }
 
     @Test
     void viagemIniciada_abreMonitoramentoComPontosNaoRealizados() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
                 .thenReturn(List.of(ponto("aluno-1", PONTO_LAT, PONTO_LNG)));
 
         monitor.iniciarMonitoramento(VIAGEM_ID);
 
-        verify(pontoEmbarqueJpaRepository).findByViagemIdAndRealizadoFalse(VIAGEM_ID);
+        verify(pontoEmbarqueRepository).findByViagemIdAndRealizadoFalse(VIAGEM_ID);
     }
 
     @Test
     void posicaoDentroDoRaio_publicaEventoDeChegada() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
                 .thenReturn(List.of(ponto("aluno-1", PONTO_LAT, PONTO_LNG)));
 
         monitor.iniciarMonitoramento(VIAGEM_ID);
@@ -89,7 +82,7 @@ class ChegadaE2ETest {
 
     @Test
     void posicaoForaDoRaio_naoPublicaEvento() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
                 .thenReturn(List.of(ponto("aluno-1", PONTO_LAT, PONTO_LNG)));
 
         monitor.iniciarMonitoramento(VIAGEM_ID);
@@ -101,7 +94,7 @@ class ChegadaE2ETest {
 
     @Test
     void pontoCobertoNaoNotificaDuasVezes() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
                 .thenReturn(List.of(ponto("aluno-1", PONTO_LAT, PONTO_LNG)));
 
         monitor.iniciarMonitoramento(VIAGEM_ID);
@@ -114,7 +107,7 @@ class ChegadaE2ETest {
 
     @Test
     void todosPontosCobertos_encerraMonitoramento() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
                 .thenReturn(List.of(ponto("aluno-1", PONTO_LAT, PONTO_LNG)));
 
         monitor.iniciarMonitoramento(VIAGEM_ID);
@@ -127,7 +120,7 @@ class ChegadaE2ETest {
 
     @Test
     void multiplosAlunosNoMesmoPonto_umEventoComTodosAlunos() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
                 .thenReturn(List.of(
                         ponto("aluno-1", PONTO_LAT, PONTO_LNG),
                         ponto("aluno-2", PONTO_LAT, PONTO_LNG)));
@@ -145,7 +138,7 @@ class ChegadaE2ETest {
 
     @Test
     void viagemFinalizada_encerraMonitoramentoSemNovosEventos() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
                 .thenReturn(List.of(ponto("aluno-1", PONTO_LAT, PONTO_LNG)));
 
         monitor.iniciarMonitoramento(VIAGEM_ID);
@@ -157,7 +150,7 @@ class ChegadaE2ETest {
 
     @Test
     void semPontosNaoRealizados_naoAbreMonitoramento() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
                 .thenReturn(List.of());
 
         monitor.iniciarMonitoramento(VIAGEM_ID);
@@ -168,7 +161,7 @@ class ChegadaE2ETest {
 
     @Test
     void raioDeChegadaEhDe300Metros() {
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
                 .thenReturn(List.of(ponto("aluno-1", PONTO_LAT, PONTO_LNG)));
 
         monitor.iniciarMonitoramento(VIAGEM_ID);
@@ -182,7 +175,7 @@ class ChegadaE2ETest {
     void chegadaPublicadaNoRabbit_naoBloqueiaEmCasoDeErro() {
         when(eventPublisher.publishChegada(any()))
                 .thenReturn(Mono.error(new RuntimeException("Rabbit indisponivel")));
-        when(pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
+        when(pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(VIAGEM_ID))
                 .thenReturn(List.of(ponto("aluno-1", PONTO_LAT, PONTO_LNG)));
 
         monitor.iniciarMonitoramento(VIAGEM_ID);

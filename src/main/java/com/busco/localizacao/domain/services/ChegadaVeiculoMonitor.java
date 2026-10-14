@@ -1,8 +1,8 @@
 package com.busco.localizacao.domain.services;
 
+import com.busco.localizacao.domain.entity.PontoEmbarque;
 import com.busco.localizacao.domain.events.ViagemChegadaEvent;
-import com.busco.localizacao.infra.jpa.PontoEmbarqueEntity;
-import com.busco.localizacao.infra.jpa.PontoEmbarqueJpaRepository;
+import com.busco.localizacao.domain.repository.PontoEmbarqueRepository;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,7 +17,7 @@ public class ChegadaVeiculoMonitor {
 
     private static final Logger log = LoggerFactory.getLogger(ChegadaVeiculoMonitor.class);
 
-    private final PontoEmbarqueJpaRepository pontoEmbarqueJpaRepository;
+    private final PontoEmbarqueRepository pontoEmbarqueRepository;
     private final TrackingEventPublisher eventPublisher;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -35,9 +35,9 @@ public class ChegadaVeiculoMonitor {
     private final Map<String, Monitoragem> monitoresAtivos = new ConcurrentHashMap<>();
 
     public ChegadaVeiculoMonitor(
-            PontoEmbarqueJpaRepository pontoEmbarqueJpaRepository,
+            PontoEmbarqueRepository pontoEmbarqueRepository,
             TrackingEventPublisher eventPublisher) {
-        this.pontoEmbarqueJpaRepository = pontoEmbarqueJpaRepository;
+        this.pontoEmbarqueRepository = pontoEmbarqueRepository;
         this.eventPublisher = eventPublisher;
     }
 
@@ -80,13 +80,13 @@ public class ChegadaVeiculoMonitor {
     }
 
     private Monitoragem montarMonitor(String viagemId) {
-        List<PontoEmbarqueEntity> pontos = pontoEmbarqueJpaRepository.findByViagemIdAndRealizadoFalse(viagemId);
+        List<PontoEmbarque> pontos = pontoEmbarqueRepository.findByViagemIdAndRealizadoFalse(viagemId);
         if (pontos == null || pontos.isEmpty()) {
             return null;
         }
 
         Map<String, PontoChegada> pontosPorChave = new LinkedHashMap<>();
-        for (PontoEmbarqueEntity ponto : pontos) {
+        for (PontoEmbarque ponto : pontos) {
             String chave = ponto.getLatitude() + "," + ponto.getLongitude();
             PontoChegada pontoChegada = pontosPorChave.computeIfAbsent(chave,
                     k -> new PontoChegada(k, ponto.getLatitude(), ponto.getLongitude()));

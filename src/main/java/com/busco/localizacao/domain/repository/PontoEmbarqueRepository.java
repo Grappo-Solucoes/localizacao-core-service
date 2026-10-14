@@ -1,22 +1,19 @@
 package com.busco.localizacao.domain.repository;
 
-import com.busco.localizacao.infra.jpa.PontoEmbarqueEntity;
+import com.busco.localizacao.domain.entity.PontoEmbarque;
 
 import java.util.List;
-import java.util.Optional;
 
 /**
- * Interface de repositório de PontoEmbarque no domínio.
+ * Porta de repositório de {@link PontoEmbarque} no domínio.
+ *
+ * <p>Expressa o contrato em termos do tipo de domínio (não da entidade JPA) para
+ * manter o domínio independente da infraestrutura de persistência (design D2).
+ * A implementação vive em {@code infra/jpa}, espelhando {@link PontoRotaRepository}.</p>
  */
 public interface PontoEmbarqueRepository {
 
-    Optional<PontoEmbarqueEntity> findById(String id);
+    List<PontoEmbarque> findByViagemId(String viagemId);
 
-    List<PontoEmbarqueEntity> findByViagemId(String viagemId);
-
-    List<PontoEmbarqueEntity> findByViagemIdAndRealizadoFalse(String viagemId);
-
-    PontoEmbarqueEntity save(PontoEmbarqueEntity entity);
-
-    void deleteById(String id);
+    List<PontoEmbarque> findByViagemIdAndRealizadoFalse(String viagemId);
 }

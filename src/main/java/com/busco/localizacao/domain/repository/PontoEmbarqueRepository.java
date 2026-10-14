@@ -9,7 +9,7 @@ import java.util.List;
  *
  * <p>Expressa o contrato em termos do tipo de domínio (não da entidade JPA) para
  * manter o domínio independente da infraestrutura de persistência (design D2).
- * A implementação vive em {@code infra/jpa}, espelhando {@link PontoRotaRepository}.</p>
+ * A implementação vive em {@code infra/repo}, espelhando {@link PontoRotaRepository}.</p>
  */
 public interface PontoEmbarqueRepository {
 

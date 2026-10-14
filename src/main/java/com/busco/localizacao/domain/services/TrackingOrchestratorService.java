@@ -37,6 +37,7 @@ public class TrackingOrchestratorService {
     private final TrackingConsistencyService consistencyService;
     private final RotaRedisRepository rotaRedisRepository;
     private final AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository;
+    private final RotaIntegrationService rotaIntegrationService;
     private final VisaoGeralPublisher visaoGeralSnapshotPublisher;
     private final ChegadaVeiculoMonitor chegadaVeiculoMonitor;
 
@@ -53,6 +54,7 @@ public class TrackingOrchestratorService {
             TrackingConsistencyService consistencyService,
             RotaRedisRepository rotaRedisRepository,
             AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository,
+            RotaIntegrationService rotaIntegrationService,
             VisaoGeralPublisher visaoGeralSnapshotPublisher,
             ChegadaVeiculoMonitor chegadaVeiculoMonitor) {
         this.trackingEngine = trackingEngine;
@@ -67,6 +69,7 @@ public class TrackingOrchestratorService {
         this.consistencyService = consistencyService;
         this.rotaRedisRepository = rotaRedisRepository;
         this.alunoEmbarqueRedisRepository = alunoEmbarqueRedisRepository;
+        this.rotaIntegrationService = rotaIntegrationService;
         this.visaoGeralSnapshotPublisher = visaoGeralSnapshotPublisher;
         this.chegadaVeiculoMonitor = chegadaVeiculoMonitor;
     }
@@ -140,6 +143,11 @@ public class TrackingOrchestratorService {
 
                                 // Encontra o próximo ponto da rota
                                 Optional<PontoRota> proximoPonto = encontrarProximoPonto(pontosRota, lat, lng);
+
+                                // Spec localizacao/geofence: as zonas sao registradas quando a rota e
+                                // os embarques da viagem sao carregados, antes de consultar proximidade.
+                                rotaIntegrationService.registrarGeofencingRota(viagemId, pontosRota);
+                                rotaIntegrationService.registrarGeofencingAlunos(viagemId, alunos.values());
 
                                 // Prepara operações paralelas
                                 Mono<String> enderecoMono = geocodingService.reverseGeocode(lat, lng);
@@ -373,7 +381,8 @@ public class TrackingOrchestratorService {
 
         return Flux.fromIterable(pontos)
                 .flatMap(ponto ->
-                        geofencingService.checkPosition(viagemId, lat, lng, "ponto:" + viagemId + ":" + ponto.getId())
+                        geofencingService.checkPosition(viagemId, lat, lng,
+                                GeofencingService.zoneIdPontoRota(viagemId, ponto.getId()))
                 )
                 .filter(event -> event.isInside())
                 .map(event -> "PROXIMO_PONTO")
@@ -382,7 +391,8 @@ public class TrackingOrchestratorService {
                         Flux.fromIterable(alunos.values())
                                 .flatMap(aluno ->
                                         geofencingService.checkPosition(viagemId, lat, lng,
-                                                "aluno:" + viagemId + ":" + aluno.getAlunoId() + ":" + aluno.getTipo())
+                                                GeofencingService.zoneIdPontoEmbarque(
+                                                        viagemId, aluno.getAlunoId(), aluno.getTipo()))
                                 )
                                 .filter(event -> event.isInside())
                                 .map(event -> "PROXIMO_ALUNO")
@@ -423,6 +433,12 @@ public class TrackingOrchestratorService {
                     .proximoPontoTipo(proximoPonto.getTipo().toString());
         }
 
+        // Zona de geofence identificada (ponto da rota ou embarque de aluno)
+        String zonaProxima = tuple.getT4();
+        if (zonaProxima != null && !zonaProxima.isBlank()) {
+            eventBuilder.metadata(Map.of("proximaZona", zonaProxima));
+        }
+
         // Determina status
         if (result.speed() < 1) {
             eventBuilder.status("PARADO");
@@ -457,6 +473,7 @@ public class TrackingOrchestratorService {
                 .proximoPontoDistancia(event.getProximoPontoDistancia())
                 .proximoPontoETA(event.getProximoPontoETA())
                 .proximoPontoTipo(event.getProximoPontoTipo())
+                .metadata(event.getMetadata())
                 .build();
     }
 

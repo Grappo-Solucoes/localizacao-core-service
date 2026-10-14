@@ -43,6 +43,7 @@ class PipelineTrackingE2ETest {
     private TrackingEventPublisher eventPublisher;
     private SimpMessagingTemplate messagingTemplate;
     private ChegadaVeiculoMonitor chegadaVeiculoMonitor;
+    private GeofencingService geofencingService;
     private TrackingOrchestratorService orchestrator;
 
     @BeforeEach
@@ -54,6 +55,7 @@ class PipelineTrackingE2ETest {
         eventPublisher = mock(TrackingEventPublisher.class);
         messagingTemplate = mock(SimpMessagingTemplate.class);
         chegadaVeiculoMonitor = mock(ChegadaVeiculoMonitor.class);
+        geofencingService = new GeofencingService();
 
         when(eventPublisher.publish(any())).thenReturn(Mono.empty());
         when(geocodingService.reverseGeocode(anyDouble(), anyDouble()))
@@ -87,7 +89,7 @@ class PipelineTrackingE2ETest {
                 eventPublisher,
                 geocodingService,
                 new RouteCalculator(),
-                new GeofencingService(),
+                geofencingService,
                 new StopDetectionService(),
                 new RoutePredictionService(),
                 new BatteryOptimizationService(),
@@ -95,6 +97,7 @@ class PipelineTrackingE2ETest {
                 new TrackingConsistencyService(),
                 rotaRedisRepository,
                 alunoEmbarqueRedisRepository,
+                new RotaIntegrationService(rotaRedisRepository, alunoEmbarqueRedisRepository, geofencingService),
                 snapshotPublisher,
                 chegadaVeiculoMonitor
         );
@@ -295,5 +298,70 @@ class PipelineTrackingE2ETest {
                 VIAGEM_ID, -23.5600, -46.6400, 1_700_000_000_000L, null, null, null).block());
 
         verify(eventPublisher).publish(any());
+    }
+
+    @Test
+    void posicaoDentroDaZonaDePonto_incluiProximaZonaNoEvento() {
+        // posicao sobre o ponto da rota: dentro da zona de 100 m registrada para ele
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.5600, -46.6400, 1_700_000_000_000L, null, null, null
+        ).block();
+
+        ViagemPosicaoAtualizadaEvent evento = eventoPublicado();
+        assertEquals("PROXIMO_PONTO", evento.getMetadata().get("proximaZona"));
+    }
+
+    @Test
+    void posicaoDentroDaZonaDeEmbarque_incluiProximaZonaDeAlunoNoEvento() {
+        PontoEmbarque embarque = new PontoEmbarque(
+                "aluno-1", "ponto-1", -23.5700, -46.6500, PontoEmbarque.TipoEmbarque.EMBARQUE);
+        when(alunoEmbarqueRedisRepository.buscarMapaEmbarques(VIAGEM_ID))
+                .thenReturn(Mono.just(Map.of("aluno-1", embarque)));
+
+        // ~1,5 km do ponto da rota (fora da zona dele), dentro da zona de 50 m do embarque
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.5700, -46.6500, 1_700_000_000_000L, null, null, null
+        ).block();
+
+        ViagemPosicaoAtualizadaEvent evento = eventoPublicado();
+        assertEquals("PROXIMO_ALUNO", evento.getMetadata().get("proximaZona"));
+    }
+
+    @Test
+    void posicaoForaDeTodasAsZonas_publicaEventoSemZonaProxima() {
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.6000, -46.7000, 1_700_000_000_000L, null, null, null
+        ).block();
+
+        ViagemPosicaoAtualizadaEvent evento = eventoPublicado();
+        assertTrue(evento.getMetadata() == null
+                || !evento.getMetadata().containsKey("proximaZona"));
+    }
+
+    @Test
+    void paradaDetectada_preservaZonaNoEvento() {
+        long inicio = 1_700_000_000_000L;
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.5600, -46.6400, inicio, null, null, null
+        ).block();
+        // parado por mais de 2 minutos (limiar do StopDetectionService)
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.56005, -46.64005, inicio + 130_000L, null, null, null
+        ).block();
+
+        ArgumentCaptor<ViagemPosicaoAtualizadaEvent> captor =
+                ArgumentCaptor.forClass(ViagemPosicaoAtualizadaEvent.class);
+        verify(eventPublisher, times(2)).publish(captor.capture());
+
+        ViagemPosicaoAtualizadaEvent comParada = captor.getAllValues().get(1);
+        assertNotEquals("PARADO", comParada.getStatus());
+        assertEquals("PROXIMO_PONTO", comParada.getMetadata().get("proximaZona"));
+    }
+
+    private ViagemPosicaoAtualizadaEvent eventoPublicado() {
+        ArgumentCaptor<ViagemPosicaoAtualizadaEvent> captor =
+                ArgumentCaptor.forClass(ViagemPosicaoAtualizadaEvent.class);
+        verify(eventPublisher).publish(captor.capture());
+        return captor.getValue();
     }
 }

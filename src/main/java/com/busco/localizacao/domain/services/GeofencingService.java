@@ -1,6 +1,7 @@
 package com.busco.localizacao.domain.services;
 
 import com.busco.localizacao.domain.entity.GeofenceEvent;
+import com.busco.localizacao.domain.entity.PontoEmbarque;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -12,6 +13,22 @@ import java.util.concurrent.ConcurrentHashMap;
 public class GeofencingService {
 
     private final Map<String, GeofenceZone> zones = new ConcurrentHashMap<>();
+
+    /**
+     * Id da zona de um ponto da rota. Fonte unica do esquema: quem registra e quem
+     * consulta precisam concordar exatamente, senao a consulta nunca encontra a zona.
+     */
+    public static String zoneIdPontoRota(String viagemId, String pontoId) {
+        return "ponto:" + viagemId + ":" + pontoId;
+    }
+
+    /**
+     * Id da zona de um ponto de embarque de aluno.
+     */
+    public static String zoneIdPontoEmbarque(
+            String viagemId, String alunoId, PontoEmbarque.TipoEmbarque tipo) {
+        return "aluno:" + viagemId + ":" + alunoId + ":" + tipo;
+    }
 
     public void registerZone(String zoneId, double centerLat, double centerLng, double radiusMeters) {
         zones.put(zoneId, new GeofenceZone(centerLat, centerLng, radiusMeters));

@@ -55,10 +55,11 @@
 			<artifactId>spring-boot-starter-amqp</artifactId>
 		</dependency>
 
-		<!-- SpringDoc OpenAPI -->
+		<!-- SpringDoc OpenAPI (stack servlet: o starter-websocket traz o starter-web, e
+		     o Boot escolhe MVC/Tomcat; o artefato webflux nao registra /v3/api-docs aqui) -->
 		<dependency>
 			<groupId>org.springdoc</groupId>
-			<artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
+			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>2.6.0</version>
 		</dependency>
 

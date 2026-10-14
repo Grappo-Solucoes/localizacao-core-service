@@ -1,6 +1,7 @@
 package com.busco.localizacao.ui.rest;
 
 import com.busco.localizacao.domain.services.TrackingOrchestratorService;
+import com.busco.localizacao.infra.rest.advice.ExceptionAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -31,7 +32,9 @@ class PosicaoControllerTest {
                 anyString(), anyString(), anyDouble(), anyDouble(), anyLong()))
                 .thenReturn(Mono.empty());
 
-        client = WebTestClient.bindToController(new PosicaoController(orchestratorService)).build();
+        client = WebTestClient.bindToController(new PosicaoController(orchestratorService))
+                .controllerAdvice(new ExceptionAdvice())
+                .build();
     }
 
     @Test
@@ -72,6 +75,26 @@ class PosicaoControllerTest {
 
         verify(orchestratorService).processAluno(
                 eq("aluno-9"), eq("viagem-2"), eq(-23.56), eq(-46.64), eq(1_700_000_000_500L));
+    }
+
+    @Test
+    void erroDeDominioETraduzidoPeloHandlerCentral() {
+        // spec replacement-compatibilidade: erro do dominio vira status HTTP adequado
+        // por handler central, sem excecao vazando para o cliente
+        when(orchestratorService.processMotorista(
+                anyString(), anyDouble(), anyDouble(), anyLong(), any(), any(), any()))
+                .thenReturn(Mono.error(new IllegalArgumentException("viagem invalida")));
+
+        client.post().uri("/api/viagens/viagem-1/posicoes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of(
+                        "latitude", -23.5505,
+                        "longitude", -46.6333,
+                        "timestamp", 1_700_000_000_000L))
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.error").isEqualTo("viagem invalida");
     }
 
     @Test

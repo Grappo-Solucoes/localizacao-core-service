@@ -1,4 +1,4 @@
-package com.busco.localizacao.infra.jpa;
+package com.busco.localizacao.infra.repo;
 
 import jakarta.persistence.*;
 import java.time.Instant;

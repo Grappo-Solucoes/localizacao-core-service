@@ -1,4 +1,4 @@
-package com.busco.localizacao.infra.jpa;
+package com.busco.localizacao.infra.repo;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;

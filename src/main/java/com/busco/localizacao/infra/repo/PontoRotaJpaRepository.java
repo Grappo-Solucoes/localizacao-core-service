@@ -1,4 +1,4 @@
-package com.busco.localizacao.infra.jpa;
+package com.busco.localizacao.infra.repo;
 
 import com.busco.localizacao.domain.entity.PontoRota;
 import com.busco.localizacao.domain.repository.PontoRotaRepository;

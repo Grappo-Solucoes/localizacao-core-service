@@ -8,6 +8,8 @@ import com.busco.localizacao.infra.redis.AlunoEmbarqueRedisRepository;
 import com.busco.localizacao.infra.redis.RotaRedisRepository;
 import com.busco.localizacao.domain.vo.VisaoGeral;
 import com.busco.localizacao.domain.vo.Painel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -20,6 +22,8 @@ import java.util.Optional;
 
 @Service
 public class TrackingOrchestratorService {
+
+    private static final Logger log = LoggerFactory.getLogger(TrackingOrchestratorService.class);
 
     private final TrackingEngine trackingEngine;
     private final TrackingEventPublisher eventPublisher;
@@ -170,15 +174,15 @@ public class TrackingOrchestratorService {
 //                                                event.addMetadata("stopDuration", stop.getDurationMinutes());
                                             }
 
-                                            // Verifica se chegou em algum ponto
-                                            verificarChegadaEmPonto(viagemId, pontosRota, alunos, lat, lng, timestamp)
-                                                   .subscribe(alunosNoPonto -> {
-                                                        if (!alunosNoPonto.isEmpty()) {
-//                                                            event.addMetadata("alunosNoPonto", alunosNoPonto);
-                                                        }
-                                                    });
-
-                                            return eventPublisher.publish(event)
+                                            // Verifica se chegou em algum ponto e marca o ponto como visitado.
+                                            // Encadeado (nao fire-and-forget) para que falha do Redis seja
+                                            // registrada em vez de descartada, sem derrubar o pipeline.
+                                            return verificarChegadaEmPonto(viagemId, pontosRota, alunos, lat, lng, timestamp)
+                                                    .doOnError(e -> log.warn(
+                                                            "Falha ao verificar chegada em ponto da viagem {}: {}",
+                                                            viagemId, e.getMessage()))
+                                                    .onErrorResume(e -> Mono.empty())
+                                                    .then(eventPublisher.publish(event)
                                                     .doOnSuccess(v -> {
                                                         // Publica snapshot no STOMP para Visão ao Vivo
                                                         try {
@@ -187,9 +191,9 @@ public class TrackingOrchestratorService {
                                                                     new java.util.ArrayList<>()
                                                             ));
                                                         } catch (Exception ex) {
-                                                            // Não falha o pipeline se STOMP não estiver disponível
+                                                            // Nao falha o pipeline se STOMP nao estiver disponivel
                                                         }
-                                                    });
+                                                    }));
                                         });
                             });
                 });
@@ -299,7 +303,11 @@ public class TrackingOrchestratorService {
             if (distancia < 100) { // 100 metros
                 ponto.setVisitado(true);
                 // Atualiza no Redis
-                rotaRedisRepository.atualizarPonto(ponto.getId(), ponto).subscribe();
+                rotaRedisRepository.atualizarPonto(ponto.getId(), ponto)
+                        .doOnError(e -> log.warn(
+                                "Falha ao atualizar ponto {} no Redis: {}", ponto.getId(), e.getMessage()))
+                        .onErrorResume(e -> Mono.empty())
+                        .subscribe();
                 continue;
             }
 
@@ -335,17 +343,18 @@ public class TrackingOrchestratorService {
                         ponto.setVisitado(true);
                         ponto.setHorarioChegada(timestamp);
 
-                        // Atualiza no Redis
-                        rotaRedisRepository.atualizarPonto(ponto.getId(), ponto).subscribe();
-
-                        // Busca alunos deste ponto
-                        return Flux.fromIterable(alunos.values())
-                                .filter(p -> p.getPontoId().equals(ponto.getId()) && !p.isRealizado())
-                                .map(p -> new AlunoNoPontoInfo(
-                                        p.getAlunoId(),
-                                        p.getTipo(),
-                                        calcularDistancia(latAtual, lngAtual, p.getLatitude(), p.getLongitude())
-                                ));
+                        // Atualiza no Redis antes de resolver os alunos deste ponto
+                        return rotaRedisRepository.atualizarPonto(ponto.getId(), ponto)
+                                .doOnError(e -> log.warn(
+                                        "Falha ao atualizar ponto {} no Redis: {}", ponto.getId(), e.getMessage()))
+                                .onErrorResume(e -> Mono.empty())
+                                .thenMany(Flux.fromIterable(alunos.values())
+                                        .filter(p -> p.getPontoId().equals(ponto.getId()) && !p.isRealizado())
+                                        .map(p -> new AlunoNoPontoInfo(
+                                                p.getAlunoId(),
+                                                p.getTipo(),
+                                                calcularDistancia(latAtual, lngAtual, p.getLatitude(), p.getLongitude())
+                                        )));
                     }
                     return Flux.empty();
                 })

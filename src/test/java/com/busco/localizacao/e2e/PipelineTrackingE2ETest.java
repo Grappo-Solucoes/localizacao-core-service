@@ -273,4 +273,27 @@ class PipelineTrackingE2ETest {
 
         verify(chegadaVeiculoMonitor, never()).processarPosicaoVeiculo(any(), anyDouble(), anyDouble());
     }
+
+    @Test
+    void posicaoDentroDe100mDoPonto_marcaPontoComoVisitadoNoRedis() {
+        // posicao exatamente sobre o ponto da rota configurado no setUp (-23.5600,-46.6400)
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.5600, -46.6400, 1_700_000_000_000L, null, null, null
+        ).block();
+
+        // a marcacao efetiva acontece em encontrarProximoPonto (usada para ETA/proximo ponto)
+        verify(rotaRedisRepository).atualizarPonto(eq("ponto-1"), argThat(PontoRota::isVisitado));
+        verify(eventPublisher).publish(any());
+    }
+
+    @Test
+    void falhaAoMarcarPontoVisitadoNoRedis_naoImpedePublicacaoDoEvento() {
+        when(rotaRedisRepository.atualizarPonto(anyString(), any()))
+                .thenReturn(Mono.error(new RuntimeException("Redis indisponivel")));
+
+        assertDoesNotThrow(() -> orchestrator.processMotorista(
+                VIAGEM_ID, -23.5600, -46.6400, 1_700_000_000_000L, null, null, null).block());
+
+        verify(eventPublisher).publish(any());
+    }
 }

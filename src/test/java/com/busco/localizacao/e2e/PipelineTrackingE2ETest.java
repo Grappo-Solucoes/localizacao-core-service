@@ -126,6 +126,29 @@ class PipelineTrackingE2ETest {
     }
 
     @Test
+    void geocodificacaoIndisponivel_publicaEventoSemEndereco() {
+        // Spec localizacao/enriquecimento ("Geocodificacao indisponivel"): o evento e
+        // publicado SEM endereco, sem interromper o pipeline. Gate do Optional no zip:
+        // se o Mono de endereco vazio derrubasse o Mono.zip, nenhum evento sairia.
+        when(geocodingService.reverseGeocode(anyDouble(), anyDouble())).thenReturn(Mono.empty());
+
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.5505, -46.6333, 1_700_000_000_000L, null, null, null
+        ).block();
+
+        ArgumentCaptor<ViagemPosicaoAtualizadaEvent> captor =
+                ArgumentCaptor.forClass(ViagemPosicaoAtualizadaEvent.class);
+        verify(eventPublisher).publish(captor.capture());
+
+        ViagemPosicaoAtualizadaEvent evento = captor.getValue();
+        assertNull(evento.getEndereco());
+        // Restante do enriquecimento continua intacto
+        assertEquals(VIAGEM_ID, evento.getViagemId());
+        assertEquals("ponto-1", evento.getProximoPontoId());
+        assertEquals("PARADO", evento.getStatus());
+    }
+
+    @Test
     void pipelineCompleto_estadoPersistidoNoTrackingEngine() {
         orchestrator.processMotorista(
                 VIAGEM_ID, -23.5505, -46.6333, 1_700_000_000_000L, null, null, null

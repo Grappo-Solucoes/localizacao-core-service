@@ -150,7 +150,13 @@ public class TrackingOrchestratorService {
                                 rotaIntegrationService.registrarGeofencingAlunos(viagemId, alunos.values());
 
                                 // Prepara operações paralelas
-                                Mono<String> enderecoMono = geocodingService.reverseGeocode(lat, lng);
+                                // Endereco e opcional (spec localizacao/enriquecimento, cenario
+                                // "Geocodificacao indisponivel"): reverseGeocode emite vazio quando
+                                // o provedor falha, entao o Optional mantem o Mono.zip com valor e o
+                                // evento segue sem endereco.
+                                Mono<Optional<String>> enderecoMono = geocodingService.reverseGeocode(lat, lng)
+                                        .map(Optional::of)
+                                        .defaultIfEmpty(Optional.empty());
 
                                 Mono<RouteInfo> routeMono = proximoPonto.isPresent() ?
                                         routeCalculator.calculateETA(
@@ -362,7 +368,7 @@ public class TrackingOrchestratorService {
     private ViagemPosicaoAtualizadaEvent criarEventoMotorista(
             String viagemId,
             TrackingResult result,
-            Tuple4<String, RouteInfo, Optional<Position>, String> tuple,
+            Tuple4<Optional<String>, RouteInfo, Optional<Position>, String> tuple,
             BatteryOptimizationService.TrackingConfig batteryConfig,
             Double accuracy,
             String provedor,
@@ -374,7 +380,7 @@ public class TrackingOrchestratorService {
                 .longitude(result.longitude())
                 .timestamp(result.timestamp())
                 .velocidade(result.speed())
-                .endereco(tuple.getT1())
+                .endereco(tuple.getT1().orElse(null))
                 .distanciaParaDestino(tuple.getT2().distance())
                 .etaSegundos(tuple.getT2().etaSeconds())
                 .accuracy(accuracy)

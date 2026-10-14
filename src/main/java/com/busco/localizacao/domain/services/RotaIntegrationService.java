@@ -5,7 +5,6 @@ import com.busco.localizacao.domain.entity.PontoRota;
 import com.busco.localizacao.infra.redis.AlunoEmbarqueRedisRepository;
 import com.busco.localizacao.infra.redis.RotaRedisRepository;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.Collection;
@@ -88,34 +87,6 @@ public class RotaIntegrationService {
     }
 
     /**
-     * Encontra alunos no ponto atual
-     */
-    public Flux<AlunoNoPontoInfo> encontrarAlunosNoPonto(
-            String viagemId,
-            String pontoId,
-            double latPonto,
-            double lngPonto) {
-
-        return alunoEmbarqueRedisRepository.buscarTodosPontosEmbarque(viagemId)
-                .filter(ponto -> ponto.getPontoId().equals(pontoId) && !ponto.isRealizado())
-                .flatMap(ponto -> {
-                    double distancia = calcularDistancia(
-                            latPonto, lngPonto,
-                            ponto.getLatitude(), ponto.getLongitude()
-                    );
-
-                    if (distancia < 100) { // 100 metros
-                        return Mono.just(new AlunoNoPontoInfo(
-                                ponto.getAlunoId(),
-                                ponto.getTipo(),
-                                distancia
-                        ));
-                    }
-                    return Mono.empty();
-                });
-    }
-
-    /**
      * Registra zonas de geofencing para os pontos da rota ja carregados da viagem.
      */
     public void registrarGeofencingRota(String viagemId, Collection<PontoRota> pontos) {
@@ -153,11 +124,4 @@ public class RotaIntegrationService {
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         return 6371000 * c; // metros
     }
-
-    // Record para informação de aluno no ponto
-    public record AlunoNoPontoInfo(
-            String alunoId,
-            PontoEmbarque.TipoEmbarque tipo,
-            double distanciaMetros
-    ) {}
 }

@@ -182,15 +182,11 @@ public class TrackingOrchestratorService {
 //                                                event.addMetadata("stopDuration", stop.getDurationMinutes());
                                             }
 
-                                            // Verifica se chegou em algum ponto e marca o ponto como visitado.
-                                            // Encadeado (nao fire-and-forget) para que falha do Redis seja
-                                            // registrada em vez de descartada, sem derrubar o pipeline.
-                                            return verificarChegadaEmPonto(viagemId, pontosRota, alunos, lat, lng, timestamp)
-                                                    .doOnError(e -> log.warn(
-                                                            "Falha ao verificar chegada em ponto da viagem {}: {}",
-                                                            viagemId, e.getMessage()))
-                                                    .onErrorResume(e -> Mono.empty())
-                                                    .then(eventPublisher.publish(event)
+                                            // A marcacao de ponto visitado (<100 m) acontece em
+                                            // encontrarProximoPonto, acima, que alimenta o proximo ponto/ETA
+                                            // do evento (spec localizacao/enriquecimento). A deteccao de
+                                            // chegada e notificacao fica no ChegadaVeiculoMonitor (300 m).
+                                            return eventPublisher.publish(event)
                                                     .doOnSuccess(v -> {
                                                         // Publica snapshot no STOMP para Visão ao Vivo
                                                         try {
@@ -201,7 +197,7 @@ public class TrackingOrchestratorService {
                                                         } catch (Exception ex) {
                                                             // Nao falha o pipeline se STOMP nao estiver disponivel
                                                         }
-                                                    }));
+                                                    });
                                         });
                             });
                 });
@@ -329,47 +325,6 @@ public class TrackingOrchestratorService {
     }
 
     /**
-     * Verifica se chegou em algum ponto e se há alunos
-     */
-    private Mono<List<AlunoNoPontoInfo>> verificarChegadaEmPonto(
-            String viagemId,
-            List<PontoRota> pontos,
-            Map<String, PontoEmbarque> alunos,
-            double latAtual,
-            double lngAtual,
-            long timestamp) {
-
-        return Flux.fromIterable(pontos)
-                .filter(ponto -> !ponto.isVisitado())
-                .flatMap(ponto -> {
-                    double distancia = calcularDistancia(
-                            latAtual, lngAtual,
-                            ponto.getLatitude(), ponto.getLongitude()
-                    );
-
-                    if (distancia < 100) { // Chegou no ponto
-                        ponto.setVisitado(true);
-                        ponto.setHorarioChegada(timestamp);
-
-                        // Atualiza no Redis antes de resolver os alunos deste ponto
-                        return rotaRedisRepository.atualizarPonto(ponto.getId(), ponto)
-                                .doOnError(e -> log.warn(
-                                        "Falha ao atualizar ponto {} no Redis: {}", ponto.getId(), e.getMessage()))
-                                .onErrorResume(e -> Mono.empty())
-                                .thenMany(Flux.fromIterable(alunos.values())
-                                        .filter(p -> p.getPontoId().equals(ponto.getId()) && !p.isRealizado())
-                                        .map(p -> new AlunoNoPontoInfo(
-                                                p.getAlunoId(),
-                                                p.getTipo(),
-                                                calcularDistancia(latAtual, lngAtual, p.getLatitude(), p.getLongitude())
-                                        )));
-                    }
-                    return Flux.empty();
-                })
-                .collectList();
-    }
-
-    /**
      * Verifica zonas de geofencing próximas
      */
     private Mono<String> verificarZonasProximas(
@@ -489,13 +444,5 @@ public class TrackingOrchestratorService {
                         Math.sin(dLon / 2) * Math.sin(dLon / 2);
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return 6371000 * c;
-    }
-
-    // Record para informação de aluno no ponto
-    private record AlunoNoPontoInfo(
-            String alunoId,
-            PontoEmbarque.TipoEmbarque tipo,
-            double distanciaMetros
-    ) {
     }
 }

@@ -35,6 +35,7 @@ public class TrackingOrchestratorService {
     private final RotaRedisRepository rotaRedisRepository;
     private final AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository;
     private final VisaoGeralSnapshotPublisher visaoGeralSnapshotPublisher;
+    private final ChegadaVeiculoMonitor chegadaVeiculoMonitor;
 
     public TrackingOrchestratorService(
             TrackingEngine trackingEngine,
@@ -49,7 +50,8 @@ public class TrackingOrchestratorService {
             TrackingConsistencyService consistencyService,
             RotaRedisRepository rotaRedisRepository,
             AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository,
-            VisaoGeralSnapshotPublisher visaoGeralSnapshotPublisher) {
+            VisaoGeralSnapshotPublisher visaoGeralSnapshotPublisher,
+            ChegadaVeiculoMonitor chegadaVeiculoMonitor) {
         this.trackingEngine = trackingEngine;
         this.eventPublisher = eventPublisher;
         this.geocodingService = geocodingService;
@@ -63,6 +65,7 @@ public class TrackingOrchestratorService {
         this.rotaRedisRepository = rotaRedisRepository;
         this.alunoEmbarqueRedisRepository = alunoEmbarqueRedisRepository;
         this.visaoGeralSnapshotPublisher = visaoGeralSnapshotPublisher;
+        this.chegadaVeiculoMonitor = chegadaVeiculoMonitor;
     }
 
     /**
@@ -107,6 +110,10 @@ public class TrackingOrchestratorService {
                     if (!antiFraudService.isValid(pos)) {
                         return Mono.empty(); // posição suspeita
                     }
+
+                    // Alimenta a detecção de chegada com a posição processada do veículo
+                    chegadaVeiculoMonitor.processarPosicaoVeiculo(
+                            viagemId, result.latitude(), result.longitude());
 
                     // Adiciona ao histórico de previsão
                     predictionService.addPosition(viagemId, result.latitude(), result.longitude(), timestamp);

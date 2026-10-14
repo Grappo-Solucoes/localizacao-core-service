@@ -42,6 +42,7 @@ class PipelineTrackingE2ETest {
     private GeocodingService geocodingService;
     private TrackingEventPublisher eventPublisher;
     private SimpMessagingTemplate messagingTemplate;
+    private ChegadaVeiculoMonitor chegadaVeiculoMonitor;
     private TrackingOrchestratorService orchestrator;
 
     @BeforeEach
@@ -52,6 +53,7 @@ class PipelineTrackingE2ETest {
         geocodingService = mock(GeocodingService.class);
         eventPublisher = mock(TrackingEventPublisher.class);
         messagingTemplate = mock(SimpMessagingTemplate.class);
+        chegadaVeiculoMonitor = mock(ChegadaVeiculoMonitor.class);
 
         when(eventPublisher.publish(any())).thenReturn(Mono.empty());
         when(geocodingService.reverseGeocode(anyDouble(), anyDouble()))
@@ -93,7 +95,8 @@ class PipelineTrackingE2ETest {
                 new TrackingConsistencyService(),
                 rotaRedisRepository,
                 alunoEmbarqueRedisRepository,
-                snapshotPublisher
+                snapshotPublisher,
+                chegadaVeiculoMonitor
         );
     }
 
@@ -244,5 +247,30 @@ class PipelineTrackingE2ETest {
 
         // contrato: TrackingState vive no Redis (key "viagem:{id}")
         verify(trackingStateRepository).save(eq("viagem:" + VIAGEM_ID), any());
+    }
+
+    @Test
+    void posicaoProcessada_alimentaDeteccaoDeChegada() {
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.5505, -46.6333, 1_700_000_000_000L, null, null, null
+        ).block();
+
+        // a detecção de chegada recebe a posição processada do veículo
+        verify(chegadaVeiculoMonitor).processarPosicaoVeiculo(
+                eq(VIAGEM_ID), eq(-23.5505), eq(-46.6333));
+    }
+
+    @Test
+    void posicaoDescartada_naoAlimentaDeteccaoDeChegada() {
+        TrackingState anterior = new TrackingState(-23.5505, -46.6333, 2_000_000_000_000L, 30.0);
+        when(trackingStateRepository.find("viagem:" + VIAGEM_ID))
+                .thenReturn(Mono.just(anterior));
+
+        // timestamp menor que o anterior -> inconsistente, descartada
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.5600, -46.6400, 1_000_000_000_000L, null, null, null
+        ).block();
+
+        verify(chegadaVeiculoMonitor, never()).processarPosicaoVeiculo(any(), anyDouble(), anyDouble());
     }
 }

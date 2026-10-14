@@ -3,6 +3,7 @@ package com.busco.localizacao.e2e;
 import com.busco.localizacao.domain.entity.PontoEmbarque;
 import com.busco.localizacao.domain.entity.PontoRota;
 import com.busco.localizacao.domain.entity.TrackingState;
+import com.busco.localizacao.domain.events.AlunoPosicaoAtualizadaEvent;
 import com.busco.localizacao.domain.events.ViagemPosicaoAtualizadaEvent;
 import com.busco.localizacao.domain.services.*;
 import com.busco.localizacao.domain.vo.GeoPoint;
@@ -222,8 +223,10 @@ class PipelineTrackingE2ETest {
 
     @Test
     void geocodingIndisponivel_naoQuebraPipeline() {
+        // Contrato real do GeocodingService quando o provedor falha: Mono VAZIO (nunca
+        // texto sentinela). O evento sai sem endereco.
         when(geocodingService.reverseGeocode(anyDouble(), anyDouble()))
-                .thenReturn(Mono.just(""));
+                .thenReturn(Mono.empty());
 
         orchestrator.processMotorista(
                 VIAGEM_ID, -23.5505, -46.6333, 1_700_000_000_000L, null, null, null
@@ -232,7 +235,44 @@ class PipelineTrackingE2ETest {
         ArgumentCaptor<ViagemPosicaoAtualizadaEvent> captor =
                 ArgumentCaptor.forClass(ViagemPosicaoAtualizadaEvent.class);
         verify(eventPublisher).publish(captor.capture());
-        assertEquals("", captor.getValue().getEndereco());
+        assertNull(captor.getValue().getEndereco());
+    }
+
+    @Test
+    void chaveDeRotaAusenteNoRedis_publicaEvento() {
+        // GET de chave inexistente no Redis devolve Mono VAZIO (nao Mono de lista vazia).
+        // Antes: o Mono.zip com essa fonte ficava vazio e a posicao era descartada em
+        // silencio, com 200 no REST e nenhum evento publicado.
+        when(rotaRedisRepository.buscarPontosRota(VIAGEM_ID)).thenReturn(Mono.empty());
+
+        orchestrator.processMotorista(
+                VIAGEM_ID, -23.5505, -46.6333, 1_700_000_000_000L, null, null, null
+        ).block();
+
+        ArgumentCaptor<ViagemPosicaoAtualizadaEvent> captor =
+                ArgumentCaptor.forClass(ViagemPosicaoAtualizadaEvent.class);
+        verify(eventPublisher).publish(captor.capture());
+        assertNull(captor.getValue().getProximoPontoId());
+        assertEquals(VIAGEM_ID, captor.getValue().getViagemId());
+    }
+
+    @Test
+    void posicaoAlunoSemEmbarcacaoRegistrada_publicaEvento() {
+        // HGET de campo inexistente tambem devolve Mono VAZIO: o aluno sem embarque no
+        // hash (ou sem embarque cadastrado) nao podia perder o evento.
+        when(eventPublisher.publishAluno(any())).thenReturn(Mono.empty());
+        when(alunoEmbarqueRedisRepository.buscarPontoEmbarque(VIAGEM_ID, "aluno-sem-embarque"))
+                .thenReturn(Mono.empty());
+
+        orchestrator.processAluno(
+                "aluno-sem-embarque", VIAGEM_ID, -23.5505, -46.6333, 1_700_000_000_000L
+        ).block();
+
+        ArgumentCaptor<AlunoPosicaoAtualizadaEvent> captor =
+                ArgumentCaptor.forClass(AlunoPosicaoAtualizadaEvent.class);
+        verify(eventPublisher).publishAluno(captor.capture());
+        assertEquals("SEM_PONTO_DEFINIDO", captor.getValue().getStatus());
+        assertEquals("aluno-sem-embarque", captor.getValue().getAlunoId());
     }
 
     @Test

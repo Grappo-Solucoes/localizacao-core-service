@@ -132,9 +132,16 @@ public class TrackingOrchestratorService {
                         batteryConfig = null;
                     }
 
-                    // Busca dados da rota e alunos do Redis
-                    Mono<List<PontoRota>> pontosRotaMono = rotaRedisRepository.buscarPontosRota(viagemId);
-                    Mono<Map<String, PontoEmbarque>> alunosMono = alunoEmbarqueRedisRepository.buscarMapaEmbarques(viagemId);
+                    // Busca dados da rota e alunos do Redis. Atencao: GET/HGET de chave
+                    // inexistente retorna Mono VAZIO, e um Mono.zip com qualquer fonte vazia
+                    // fica vazio — ou seja, a viagem sem rota no Redis (chave ausente, TTL de
+                    // 12h expirado ou rota que ainda nao chegou) perdia a posicao em silencio,
+                    // respondendo 200 no REST sem publicar evento. A spec exige publicar o
+                    // evento mesmo sem pontos (cenario "Rota sem pontos nao visitados").
+                    Mono<List<PontoRota>> pontosRotaMono = rotaRedisRepository.buscarPontosRota(viagemId)
+                            .defaultIfEmpty(List.of());
+                    Mono<Map<String, PontoEmbarque>> alunosMono = alunoEmbarqueRedisRepository.buscarMapaEmbarques(viagemId)
+                            .defaultIfEmpty(Map.of());
 
                     return Mono.zip(pontosRotaMono, alunosMono)
                             .flatMap(rotaAlunosTuple -> {
@@ -222,14 +229,22 @@ public class TrackingOrchestratorService {
         String keyAluno = "aluno:" + alunoId;
         String keyViagem = "viagem:" + viagemId;
 
+        // Mesmo cuidado do motorista: sem ponto de embarque no hash, o HGET volta vazio e o
+        // zip inteiro ficaria vazio, derrubando o evento do aluno. O Optional mantem o
+        // pipeline vivo e cai no ramo "SEM_PONTO_DEFINIDO" que ja existia abaixo.
+        Mono<Optional<PontoEmbarque>> embarqueMono = alunoEmbarqueRedisRepository
+                .buscarPontoEmbarque(viagemId, alunoId)
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty());
+
         return Mono.zip(
                 trackingEngine.process(keyAluno, lat, lng, timestamp),
                 trackingEngine.getLastPosition(keyViagem),
-                alunoEmbarqueRedisRepository.buscarPontoEmbarque(viagemId, alunoId)
+                embarqueMono
         ).flatMap(tuple -> {
             TrackingResult resultAluno = tuple.getT1();
             Optional<TrackingState> optViagem = tuple.getT2();
-            PontoEmbarque pontoEmbarque = tuple.getT3();
+            PontoEmbarque pontoEmbarque = tuple.getT3().orElse(null);
 
             AlunoPosicaoAtualizadaEvent.Builder eventBuilder = AlunoPosicaoAtualizadaEvent.builder()
                     .alunoId(alunoId)

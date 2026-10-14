@@ -2,6 +2,7 @@ package com.busco.localizacao.infra.rabbit;
 
 
 import com.busco.localizacao.domain.events.AlunoPosicaoAtualizadaEvent;
+import com.busco.localizacao.domain.events.ViagemChegadaEvent;
 import com.busco.localizacao.domain.events.ViagemPosicaoAtualizadaEvent;
 import com.busco.localizacao.domain.services.TrackingEventPublisher;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -49,6 +50,24 @@ public class RabbitTrackingEventPublisher
                 rabbit.convertAndSend(
                         "location.exchange",
                         "aluno.posicao",
+                        event,
+                        message -> {
+                            message.getMessageProperties().setHeader("event-type", event.getClass().getSimpleName());
+                            message.getMessageProperties().setHeader("version", "1.0");
+                            message.getMessageProperties().setHeader("timestamp", System.currentTimeMillis());
+                            return message;
+                        })
+        );
+    }
+
+    @Override
+    public Mono<Void> publishChegada(
+            ViagemChegadaEvent event
+    ) {
+        return Mono.fromRunnable(() ->
+                rabbit.convertAndSend(
+                        "location.exchange",
+                        "viagem.chegada",
                         event,
                         message -> {
                             message.getMessageProperties().setHeader("event-type", event.getClass().getSimpleName());

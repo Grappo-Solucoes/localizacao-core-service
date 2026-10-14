@@ -24,11 +24,6 @@ public class AlunoEmbarqueRedisRepository {
         this.hashOperations = redisTemplate.opsForHash();
     }
 
-    public AlunoEmbarqueRedisRepository() {
-        this.redisTemplate = null;
-        this.hashOperations = null;
-    }
-
     /**
      * Salva ponto de embarque de um aluno para uma viagem
      */

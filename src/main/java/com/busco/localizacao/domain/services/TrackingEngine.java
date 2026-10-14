@@ -3,6 +3,7 @@ package com.busco.localizacao.domain.services;
 import com.busco.localizacao.domain.entity.TrackingResult;
 import com.busco.localizacao.domain.entity.TrackingState;
 import com.busco.localizacao.infra.redis.TrackingStateRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -14,6 +15,9 @@ public class TrackingEngine {
     private final TrackingStateRepository repository;
     private final SpeedCalculator speedCalculator;
     private final KalmanFilter kalman;
+
+    @Value("${tracking.antifraud.max-speed:150}")
+    private double maxSpeed;
 
     public TrackingEngine(
             TrackingStateRepository repository,
@@ -34,15 +38,17 @@ public class TrackingEngine {
 
         return repository
                 .find(key)
-                .flatMap(state -> processWithState(
-                        key,
-                        state,
-                        lat,
-                        lng,
-                        timestamp
-                ))
-                .switchIfEmpty(
-                        createFirstState(key, lat, lng, timestamp)
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty())
+                .flatMap(optState -> optState
+                        .map(state -> processWithState(
+                                key,
+                                state,
+                                lat,
+                                lng,
+                                timestamp
+                        ))
+                        .orElseGet(() -> createFirstState(key, lat, lng, timestamp))
                 );
     }
 
@@ -71,7 +77,7 @@ public class TrackingEngine {
                 );
 
         // Anti-spike (GPS bug)
-        if (speed > 140) {
+        if (speed > maxSpeed) {
             return Mono.empty();
         }
 

@@ -6,17 +6,24 @@ import com.busco.localizacao.domain.events.ViagemPosicaoAtualizadaEvent;
 import com.busco.localizacao.domain.vo.GeoPoint;
 import com.busco.localizacao.infra.redis.AlunoEmbarqueRedisRepository;
 import com.busco.localizacao.infra.redis.RotaRedisRepository;
+import com.busco.localizacao.domain.vo.VisaoGeral;
+import com.busco.localizacao.domain.vo.Painel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.function.Tuple4;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 @Service
 public class TrackingOrchestratorService {
+
+    private static final Logger log = LoggerFactory.getLogger(TrackingOrchestratorService.class);
 
     private final TrackingEngine trackingEngine;
     private final TrackingEventPublisher eventPublisher;
@@ -30,6 +37,9 @@ public class TrackingOrchestratorService {
     private final TrackingConsistencyService consistencyService;
     private final RotaRedisRepository rotaRedisRepository;
     private final AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository;
+    private final RotaIntegrationService rotaIntegrationService;
+    private final VisaoGeralPublisher visaoGeralSnapshotPublisher;
+    private final ChegadaVeiculoMonitor chegadaVeiculoMonitor;
 
     public TrackingOrchestratorService(
             TrackingEngine trackingEngine,
@@ -43,7 +53,10 @@ public class TrackingOrchestratorService {
             TrackingAntiFraudService antiFraudService,
             TrackingConsistencyService consistencyService,
             RotaRedisRepository rotaRedisRepository,
-            AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository) {
+            AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository,
+            RotaIntegrationService rotaIntegrationService,
+            VisaoGeralPublisher visaoGeralSnapshotPublisher,
+            ChegadaVeiculoMonitor chegadaVeiculoMonitor) {
         this.trackingEngine = trackingEngine;
         this.eventPublisher = eventPublisher;
         this.geocodingService = geocodingService;
@@ -56,6 +69,9 @@ public class TrackingOrchestratorService {
         this.consistencyService = consistencyService;
         this.rotaRedisRepository = rotaRedisRepository;
         this.alunoEmbarqueRedisRepository = alunoEmbarqueRedisRepository;
+        this.rotaIntegrationService = rotaIntegrationService;
+        this.visaoGeralSnapshotPublisher = visaoGeralSnapshotPublisher;
+        this.chegadaVeiculoMonitor = chegadaVeiculoMonitor;
     }
 
     /**
@@ -75,7 +91,7 @@ public class TrackingOrchestratorService {
         return trackingEngine.getLastPosition(key)
                 .flatMap(optionalState -> {
                     if (optionalState.isEmpty()) {
-                        return Mono.just(optionalState);
+                        return Mono.just(true);
                     }
 
                     TrackingState previousTracking = optionalState.get();
@@ -86,18 +102,24 @@ public class TrackingOrchestratorService {
                             previousTracking.getLastTimestamp()
                     );
 
+                    // Posição inconsistente (timestamp não avança) é descartada:
+                    // retorna vazio para interromper o pipeline sem emitir evento.
                     if (!consistencyService.isValid(previousPosition, current)) {
-                        return Mono.empty(); // evento inconsistente
+                        return Mono.empty();
                     }
-                    return Mono.just(optionalState);
+                    return Mono.just(true);
                 })
-                .then(trackingEngine.process(key, lat, lng, timestamp))
+                .flatMap(ignored -> trackingEngine.process(key, lat, lng, timestamp))
                 .flatMap(result -> {
                     // Verifica anti-fraude
                     Position pos = new Position(new GeoPoint(lat, lng), result.speed(), timestamp);
                     if (!antiFraudService.isValid(pos)) {
                         return Mono.empty(); // posição suspeita
                     }
+
+                    // Alimenta a detecção de chegada com a posição processada do veículo
+                    chegadaVeiculoMonitor.processarPosicaoVeiculo(
+                            viagemId, result.latitude(), result.longitude());
 
                     // Adiciona ao histórico de previsão
                     predictionService.addPosition(viagemId, result.latitude(), result.longitude(), timestamp);
@@ -110,9 +132,16 @@ public class TrackingOrchestratorService {
                         batteryConfig = null;
                     }
 
-                    // Busca dados da rota e alunos do Redis
-                    Mono<List<PontoRota>> pontosRotaMono = rotaRedisRepository.buscarPontosRota(viagemId);
-                    Mono<Map<String, PontoEmbarque>> alunosMono = alunoEmbarqueRedisRepository.buscarMapaEmbarques(viagemId);
+                    // Busca dados da rota e alunos do Redis. Atencao: GET/HGET de chave
+                    // inexistente retorna Mono VAZIO, e um Mono.zip com qualquer fonte vazia
+                    // fica vazio — ou seja, a viagem sem rota no Redis (chave ausente, TTL de
+                    // 12h expirado ou rota que ainda nao chegou) perdia a posicao em silencio,
+                    // respondendo 200 no REST sem publicar evento. A spec exige publicar o
+                    // evento mesmo sem pontos (cenario "Rota sem pontos nao visitados").
+                    Mono<List<PontoRota>> pontosRotaMono = rotaRedisRepository.buscarPontosRota(viagemId)
+                            .defaultIfEmpty(List.of());
+                    Mono<Map<String, PontoEmbarque>> alunosMono = alunoEmbarqueRedisRepository.buscarMapaEmbarques(viagemId)
+                            .defaultIfEmpty(Map.of());
 
                     return Mono.zip(pontosRotaMono, alunosMono)
                             .flatMap(rotaAlunosTuple -> {
@@ -122,8 +151,19 @@ public class TrackingOrchestratorService {
                                 // Encontra o próximo ponto da rota
                                 Optional<PontoRota> proximoPonto = encontrarProximoPonto(pontosRota, lat, lng);
 
+                                // Spec localizacao/geofence: as zonas sao registradas quando a rota e
+                                // os embarques da viagem sao carregados, antes de consultar proximidade.
+                                rotaIntegrationService.registrarGeofencingRota(viagemId, pontosRota);
+                                rotaIntegrationService.registrarGeofencingAlunos(viagemId, alunos.values());
+
                                 // Prepara operações paralelas
-                                Mono<String> enderecoMono = geocodingService.reverseGeocode(lat, lng);
+                                // Endereco e opcional (spec localizacao/enriquecimento, cenario
+                                // "Geocodificacao indisponivel"): reverseGeocode emite vazio quando
+                                // o provedor falha, entao o Optional mantem o Mono.zip com valor e o
+                                // evento segue sem endereco.
+                                Mono<Optional<String>> enderecoMono = geocodingService.reverseGeocode(lat, lng)
+                                        .map(Optional::of)
+                                        .defaultIfEmpty(Optional.empty());
 
                                 Mono<RouteInfo> routeMono = proximoPonto.isPresent() ?
                                         routeCalculator.calculateETA(
@@ -151,19 +191,26 @@ public class TrackingOrchestratorService {
                                             );
 
                                             if (stop != null) {
-                                                event.status = stop.getStopType();
+                                                event = rebuildEventWithStop(event, stop.getStopType());
 //                                                event.addMetadata("stopDuration", stop.getDurationMinutes());
                                             }
 
-                                            // Verifica se chegou em algum ponto
-                                            verificarChegadaEmPonto(viagemId, pontosRota, alunos, lat, lng, timestamp)
-                                                    .subscribe(alunosNoPonto -> {
-                                                        if (!alunosNoPonto.isEmpty()) {
-//                                                            event.addMetadata("alunosNoPonto", alunosNoPonto);
+                                            // A marcacao de ponto visitado (<100 m) acontece em
+                                            // encontrarProximoPonto, acima, que alimenta o proximo ponto/ETA
+                                            // do evento (spec localizacao/enriquecimento). A deteccao de
+                                            // chegada e notificacao fica no ChegadaVeiculoMonitor (300 m).
+                                            return eventPublisher.publish(event)
+                                                    .doOnSuccess(v -> {
+                                                        // Publica snapshot no STOMP para Visão ao Vivo
+                                                        try {
+                                                            visaoGeralSnapshotPublisher.send(new com.busco.localizacao.domain.vo.VisaoGeral(
+                                                                    com.busco.localizacao.domain.vo.Painel.of(0, 0, 0),
+                                                                    new java.util.ArrayList<>()
+                                                            ));
+                                                        } catch (Exception ex) {
+                                                            // Nao falha o pipeline se STOMP nao estiver disponivel
                                                         }
                                                     });
-
-                                            return eventPublisher.publish(event);
                                         });
                             });
                 });
@@ -182,21 +229,29 @@ public class TrackingOrchestratorService {
         String keyAluno = "aluno:" + alunoId;
         String keyViagem = "viagem:" + viagemId;
 
+        // Mesmo cuidado do motorista: sem ponto de embarque no hash, o HGET volta vazio e o
+        // zip inteiro ficaria vazio, derrubando o evento do aluno. O Optional mantem o
+        // pipeline vivo e cai no ramo "SEM_PONTO_DEFINIDO" que ja existia abaixo.
+        Mono<Optional<PontoEmbarque>> embarqueMono = alunoEmbarqueRedisRepository
+                .buscarPontoEmbarque(viagemId, alunoId)
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty());
+
         return Mono.zip(
                 trackingEngine.process(keyAluno, lat, lng, timestamp),
                 trackingEngine.getLastPosition(keyViagem),
-                alunoEmbarqueRedisRepository.buscarPontoEmbarque(viagemId, alunoId)
+                embarqueMono
         ).flatMap(tuple -> {
             TrackingResult resultAluno = tuple.getT1();
             Optional<TrackingState> optViagem = tuple.getT2();
-            PontoEmbarque pontoEmbarque = tuple.getT3();
+            PontoEmbarque pontoEmbarque = tuple.getT3().orElse(null);
 
-            AlunoPosicaoAtualizadaEvent event = new AlunoPosicaoAtualizadaEvent();
-            event.alunoId = alunoId;
-            event.viagemId = viagemId;
-            event.latitude = resultAluno.latitude();
-            event.longitude = resultAluno.longitude();
-            event.timestamp = resultAluno.timestamp();
+            AlunoPosicaoAtualizadaEvent.Builder eventBuilder = AlunoPosicaoAtualizadaEvent.builder()
+                    .alunoId(alunoId)
+                    .viagemId(viagemId)
+                    .latitude(resultAluno.latitude())
+                    .longitude(resultAluno.longitude())
+                    .timestamp(resultAluno.timestamp());
 
             // Se tem posição do ônibus, calcula distância
             if (optViagem.isPresent()) {
@@ -205,12 +260,12 @@ public class TrackingOrchestratorService {
                         lat, lng,
                         viagem.getLastLat(), viagem.getLastLng()
                 );
-                event.distanciaDoOnibus = distancia / 1000; // converte para km
+                eventBuilder.distanciaDoOnibus(distancia / 1000); // converte para km
 
                 // Calcula ETA baseado na velocidade do ônibus
                 if (viagem.getLastSpeed() > 0) {
                     double etaHoras = (distancia / 1000) / viagem.getLastSpeed();
-                    event.etaParaEmbarque = (long) (etaHoras * 3600);
+                    eventBuilder.etaParaEmbarque((long) (etaHoras * 3600));
                 }
             }
 
@@ -221,30 +276,31 @@ public class TrackingOrchestratorService {
                         pontoEmbarque.getLatitude(), pontoEmbarque.getLongitude()
                 );
 
-                event.aptoParaEmbarque = distanciaAtePonto < 100; // menos de 100m
-                event.pontoEmbarqueId = pontoEmbarque.getPontoId();
-                event.tipoEmbarque = pontoEmbarque.getTipo().toString();
-                event.distanciaAtePonto = distanciaAtePonto;
+                eventBuilder.aptoParaEmbarque(distanciaAtePonto < 100) // menos de 100m
+                        .pontoEmbarqueId(pontoEmbarque.getPontoId())
+                        .tipoEmbarque(pontoEmbarque.getTipo().toString())
+                        .distanciaAtePonto(distanciaAtePonto);
 
                 // Se está no ponto e o ônibus está próximo, pode embarcar
-                if (event.aptoParaEmbarque && optViagem.isPresent()) {
+                if (distanciaAtePonto < 100 && optViagem.isPresent()) {
                     double distanciaOnibus = calcularDistancia(
                             lat, lng,
                             optViagem.get().getLastLat(), optViagem.get().getLastLng()
                     );
 
                     if (distanciaOnibus < 200) { // Ônibus a menos de 200m
-                        event.status = "ONIBUS_PROXIMO";
+                        eventBuilder.status("ONIBUS_PROXIMO");
                     } else {
-                        event.status = "AGUARDANDO_ONIBUS";
+                        eventBuilder.status("AGUARDANDO_ONIBUS");
                     }
                 } else {
-                    event.status = event.aptoParaEmbarque ? "NO_PONTO" : "FORA_DO_PONTO";
+                    eventBuilder.status(distanciaAtePonto < 100 ? "NO_PONTO" : "FORA_DO_PONTO");
                 }
             } else {
-                event.status = "SEM_PONTO_DEFINIDO";
+                eventBuilder.status("SEM_PONTO_DEFINIDO");
             }
 
+            AlunoPosicaoAtualizadaEvent event = eventBuilder.build();
             return eventPublisher.publishAluno(event);
         });
     }
@@ -272,7 +328,11 @@ public class TrackingOrchestratorService {
             if (distancia < 100) { // 100 metros
                 ponto.setVisitado(true);
                 // Atualiza no Redis
-                rotaRedisRepository.atualizarPonto(ponto.getId(), ponto).subscribe();
+                rotaRedisRepository.atualizarPonto(ponto.getId(), ponto)
+                        .doOnError(e -> log.warn(
+                                "Falha ao atualizar ponto {} no Redis: {}", ponto.getId(), e.getMessage()))
+                        .onErrorResume(e -> Mono.empty())
+                        .subscribe();
                 continue;
             }
 
@@ -283,46 +343,6 @@ public class TrackingOrchestratorService {
         }
 
         return Optional.ofNullable(maisProximo);
-    }
-
-    /**
-     * Verifica se chegou em algum ponto e se há alunos
-     */
-    private Mono<List<AlunoNoPontoInfo>> verificarChegadaEmPonto(
-            String viagemId,
-            List<PontoRota> pontos,
-            Map<String, PontoEmbarque> alunos,
-            double latAtual,
-            double lngAtual,
-            long timestamp) {
-
-        return Flux.fromIterable(pontos)
-                .filter(ponto -> !ponto.isVisitado())
-                .flatMap(ponto -> {
-                    double distancia = calcularDistancia(
-                            latAtual, lngAtual,
-                            ponto.getLatitude(), ponto.getLongitude()
-                    );
-
-                    if (distancia < 100) { // Chegou no ponto
-                        ponto.setVisitado(true);
-                        ponto.setHorarioChegada(timestamp);
-
-                        // Atualiza no Redis
-                        rotaRedisRepository.atualizarPonto(ponto.getId(), ponto).subscribe();
-
-                        // Busca alunos deste ponto
-                        return Flux.fromIterable(alunos.values())
-                                .filter(p -> p.getPontoId().equals(ponto.getId()) && !p.isRealizado())
-                                .map(p -> new AlunoNoPontoInfo(
-                                        p.getAlunoId(),
-                                        p.getTipo(),
-                                        calcularDistancia(latAtual, lngAtual, p.getLatitude(), p.getLongitude())
-                                ));
-                    }
-                    return Flux.empty();
-                })
-                .collectList();
     }
 
     /**
@@ -337,7 +357,8 @@ public class TrackingOrchestratorService {
 
         return Flux.fromIterable(pontos)
                 .flatMap(ponto ->
-                        geofencingService.checkPosition(viagemId, lat, lng, "ponto:" + viagemId + ":" + ponto.getId())
+                        geofencingService.checkPosition(viagemId, lat, lng,
+                                GeofencingService.zoneIdPontoRota(viagemId, ponto.getId()))
                 )
                 .filter(event -> event.isInside())
                 .map(event -> "PROXIMO_PONTO")
@@ -346,7 +367,8 @@ public class TrackingOrchestratorService {
                         Flux.fromIterable(alunos.values())
                                 .flatMap(aluno ->
                                         geofencingService.checkPosition(viagemId, lat, lng,
-                                                "aluno:" + viagemId + ":" + aluno.getAlunoId() + ":" + aluno.getTipo())
+                                                GeofencingService.zoneIdPontoEmbarque(
+                                                        viagemId, aluno.getAlunoId(), aluno.getTipo()))
                                 )
                                 .filter(event -> event.isInside())
                                 .map(event -> "PROXIMO_ALUNO")
@@ -361,59 +383,74 @@ public class TrackingOrchestratorService {
     private ViagemPosicaoAtualizadaEvent criarEventoMotorista(
             String viagemId,
             TrackingResult result,
-            Tuple4<String, RouteInfo, Optional<Position>, String> tuple,
+            Tuple4<Optional<String>, RouteInfo, Optional<Position>, String> tuple,
             BatteryOptimizationService.TrackingConfig batteryConfig,
             Double accuracy,
             String provedor,
             PontoRota proximoPonto
     ) {
-        ViagemPosicaoAtualizadaEvent event = new ViagemPosicaoAtualizadaEvent();
-
-        event.viagemId = viagemId;
-        event.latitude = result.latitude();
-        event.longitude = result.longitude();
-        event.timestamp = result.timestamp();
-        event.velocidade = result.speed();
-        event.endereco = tuple.getT1();
-        event.distanciaParaDestino = tuple.getT2().distance();
-        event.etaSegundos = tuple.getT2().etaSeconds();
-        event.accuracy = accuracy;
-        event.provedor = provedor;
-        event.bateria = batteryConfig != null ? batteryConfig.batteryLevel() : null;
+        ViagemPosicaoAtualizadaEvent.Builder eventBuilder = ViagemPosicaoAtualizadaEvent.builder()
+                .viagemId(viagemId)
+                .latitude(result.latitude())
+                .longitude(result.longitude())
+                .timestamp(result.timestamp())
+                .velocidade(result.speed())
+                .endereco(tuple.getT1().orElse(null))
+                .distanciaParaDestino(tuple.getT2().distance())
+                .etaSegundos(tuple.getT2().etaSeconds())
+                .accuracy(accuracy)
+                .provedor(provedor)
+                .bateria(batteryConfig != null ? batteryConfig.batteryLevel() : null);
 
         // Informações do próximo ponto
         if (proximoPonto != null) {
-            event.proximoPontoId = proximoPonto.getId();
-            event.proximoPontoNome = proximoPonto.getNome();
-            event.proximoPontoTipo = proximoPonto.getTipo().toString();
+            eventBuilder.proximoPontoId(proximoPonto.getId())
+                    .proximoPontoNome(proximoPonto.getNome())
+                    .proximoPontoTipo(proximoPonto.getTipo().toString());
         }
 
-        // Adiciona metadados
-//        if (batteryConfig != null) {
-//            event.addMetadata("recommendedInterval", batteryConfig.updateIntervalMs());
-//            event.addMetadata("significantMove", batteryConfig.significantMoveMeters());
-//        }
-
-//        tuple.getT3().ifPresent(prediction -> {
-//            event.addMetadata("nextLat", prediction.lat());
-//            event.addMetadata("nextLng", prediction.lng());
-//            event.addMetadata("nextEta", prediction.timestamp() - result.timestamp());
-//        });
-//
-//        if (!tuple.getT4().isEmpty()) {
-//            event.addMetadata("proximaZona", tuple.getT4());
-//        }
+        // Zona de geofence identificada (ponto da rota ou embarque de aluno)
+        String zonaProxima = tuple.getT4();
+        if (zonaProxima != null && !zonaProxima.isBlank()) {
+            eventBuilder.metadata(Map.of("proximaZona", zonaProxima));
+        }
 
         // Determina status
         if (result.speed() < 1) {
-            event.status = "PARADO";
+            eventBuilder.status("PARADO");
         } else if (result.speed() < 10) {
-            event.status = "DEVAGAR";
+            eventBuilder.status("DEVAGAR");
         } else {
-            event.status = "EM_ROTA";
+            eventBuilder.status("EM_ROTA");
         }
 
-        return event;
+        return eventBuilder.build();
+    }
+
+    /**
+     * Recria o evento com novo status (imutabilidade)
+     */
+    private ViagemPosicaoAtualizadaEvent rebuildEventWithStop(ViagemPosicaoAtualizadaEvent event, String newStatus) {
+        return ViagemPosicaoAtualizadaEvent.builder()
+                .viagemId(event.getViagemId())
+                .latitude(event.getLatitude())
+                .longitude(event.getLongitude())
+                .timestamp(event.getTimestamp())
+                .velocidade(event.getVelocidade())
+                .endereco(event.getEndereco())
+                .distanciaParaDestino(event.getDistanciaParaDestino())
+                .etaSegundos(event.getEtaSegundos())
+                .status(newStatus)
+                .accuracy(event.getAccuracy())
+                .provedor(event.getProvedor())
+                .bateria(event.getBateria())
+                .proximoPontoId(event.getProximoPontoId())
+                .proximoPontoNome(event.getProximoPontoNome())
+                .proximoPontoDistancia(event.getProximoPontoDistancia())
+                .proximoPontoETA(event.getProximoPontoETA())
+                .proximoPontoTipo(event.getProximoPontoTipo())
+                .metadata(event.getMetadata())
+                .build();
     }
 
     /**
@@ -428,13 +465,5 @@ public class TrackingOrchestratorService {
                         Math.sin(dLon / 2) * Math.sin(dLon / 2);
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return 6371000 * c;
-    }
-
-    // Record para informação de aluno no ponto
-    private record AlunoNoPontoInfo(
-            String alunoId,
-            PontoEmbarque.TipoEmbarque tipo,
-            double distanciaMetros
-    ) {
     }
 }

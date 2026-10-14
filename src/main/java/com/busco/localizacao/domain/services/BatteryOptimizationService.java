@@ -11,7 +11,7 @@ public class BatteryOptimizationService {
 
     public TrackingConfig getConfigForEntity(String entityId, double batteryLevel) {
         return configs.computeIfAbsent(entityId, k ->
-                new TrackingConfig(calculateUpdateInterval(batteryLevel))
+                new TrackingConfig(calculateUpdateInterval(batteryLevel), batteryLevel)
         );
     }
 
@@ -27,9 +27,6 @@ public class BatteryOptimizationService {
         }
     }
 
-    public record TrackingConfig(long updateIntervalMs) {
-        public long batteryLevel() {
-            return 0;
-        }
+    public record TrackingConfig(long updateIntervalMs, double batteryLevel) {
     }
 }

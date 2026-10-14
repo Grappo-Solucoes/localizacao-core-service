@@ -2,19 +2,24 @@ package com.busco.localizacao.domain.services;
 
 import com.busco.localizacao.domain.entity.PontoEmbarque;
 import com.busco.localizacao.domain.entity.PontoRota;
-import com.busco.localizacao.domain.entity.RotaViagem;
 import com.busco.localizacao.infra.redis.AlunoEmbarqueRedisRepository;
 import com.busco.localizacao.infra.redis.RotaRedisRepository;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 @Service
 public class RotaIntegrationService {
+
+    /** Raio da zona de geofence de um ponto da rota (metros). */
+    static final double RAIO_ZONA_PONTO_ROTA_METROS = 100;
+
+    /** Raio da zona de geofence de um ponto de embarque de aluno (metros). */
+    static final double RAIO_ZONA_PONTO_EMBARQUE_METROS = 50;
 
     private final RotaRedisRepository rotaRedisRepository;
     private final AlunoEmbarqueRedisRepository alunoEmbarqueRedisRepository;
@@ -27,13 +32,6 @@ public class RotaIntegrationService {
         this.rotaRedisRepository = rotaRedisRepository;
         this.alunoEmbarqueRedisRepository = alunoEmbarqueRedisRepository;
         this.geofencingService = geofencingService;
-    }
-
-    /**
-     * Carrega rota da viagem do Redis
-     */
-    public Mono<RotaViagem> carregarRota(String viagemId) {
-        return rotaRedisRepository.buscarRota(viagemId);
     }
 
     /**
@@ -89,68 +87,31 @@ public class RotaIntegrationService {
     }
 
     /**
-     * Encontra alunos no ponto atual
+     * Registra zonas de geofencing para os pontos da rota ja carregados da viagem.
      */
-    public Flux<AlunoNoPontoInfo> encontrarAlunosNoPonto(
-            String viagemId,
-            String pontoId,
-            double latPonto,
-            double lngPonto) {
-
-        return alunoEmbarqueRedisRepository.buscarTodosPontosEmbarque(viagemId)
-                .filter(ponto -> ponto.getPontoId().equals(pontoId) && !ponto.isRealizado())
-                .flatMap(ponto -> {
-                    double distancia = calcularDistancia(
-                            latPonto, lngPonto,
-                            ponto.getLatitude(), ponto.getLongitude()
-                    );
-
-                    if (distancia < 100) { // 100 metros
-                        return Mono.just(new AlunoNoPontoInfo(
-                                ponto.getAlunoId(),
-                                ponto.getTipo(),
-                                distancia
-                        ));
-                    }
-                    return Mono.empty();
-                });
+    public void registrarGeofencingRota(String viagemId, Collection<PontoRota> pontos) {
+        for (PontoRota ponto : pontos) {
+            geofencingService.registerZone(
+                    GeofencingService.zoneIdPontoRota(viagemId, ponto.getId()),
+                    ponto.getLatitude(),
+                    ponto.getLongitude(),
+                    RAIO_ZONA_PONTO_ROTA_METROS
+            );
+        }
     }
 
     /**
-     * Registra zonas de geofencing para todos os pontos da rota
+     * Registra zonas de geofencing para os pontos de embarque ja carregados da viagem.
      */
-    public Mono<Void> registrarGeofencingRota(String viagemId) {
-        return carregarPontosRota(viagemId)
-                .flatMapMany(Flux::fromIterable)
-                .flatMap(ponto -> {
-                    String zoneId = "ponto:" + viagemId + ":" + ponto.getId();
-                    geofencingService.registerZone(
-                            zoneId,
-                            ponto.getLatitude(),
-                            ponto.getLongitude(),
-                            100 // raio de 100 metros
-                    );
-                    return Mono.empty();
-                })
-                .then();
-    }
-
-    /**
-     * Registra zonas de geofencing para pontos de embarque dos alunos
-     */
-    public Mono<Void> registrarGeofencingAlunos(String viagemId) {
-        return alunoEmbarqueRedisRepository.buscarTodosPontosEmbarque(viagemId)
-                .flatMap(ponto -> {
-                    String zoneId = "aluno:" + viagemId + ":" + ponto.getAlunoId() + ":" + ponto.getTipo();
-                    geofencingService.registerZone(
-                            zoneId,
-                            ponto.getLatitude(),
-                            ponto.getLongitude(),
-                            50 // raio de 50 metros para embarque
-                    );
-                    return Mono.empty();
-                })
-                .then();
+    public void registrarGeofencingAlunos(String viagemId, Collection<PontoEmbarque> alunos) {
+        for (PontoEmbarque aluno : alunos) {
+            geofencingService.registerZone(
+                    GeofencingService.zoneIdPontoEmbarque(viagemId, aluno.getAlunoId(), aluno.getTipo()),
+                    aluno.getLatitude(),
+                    aluno.getLongitude(),
+                    RAIO_ZONA_PONTO_EMBARQUE_METROS
+            );
+        }
     }
 
     private double calcularDistancia(double lat1, double lon1, double lat2, double lon2) {
@@ -163,11 +124,4 @@ public class RotaIntegrationService {
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         return 6371000 * c; // metros
     }
-
-    // Record para informação de aluno no ponto
-    public record AlunoNoPontoInfo(
-            String alunoId,
-            PontoEmbarque.TipoEmbarque tipo,
-            double distanciaMetros
-    ) {}
 }

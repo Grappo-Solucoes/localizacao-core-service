@@ -1,6 +1,7 @@
 package com.busco.localizacao.domain.services;
 
 import com.busco.localizacao.domain.entity.GeofenceEvent;
+import com.busco.localizacao.domain.entity.PontoEmbarque;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -12,6 +13,41 @@ import java.util.concurrent.ConcurrentHashMap;
 public class GeofencingService {
 
     private final Map<String, GeofenceZone> zones = new ConcurrentHashMap<>();
+
+    /**
+     * Id da zona de um ponto da rota. Fonte unica do esquema: quem registra e quem
+     * consulta precisam concordar exatamente, senao a consulta nunca encontra a zona.
+     */
+    public static String zoneIdPontoRota(String viagemId, String pontoId) {
+        return prefixoZonasPontoRota(viagemId) + pontoId;
+    }
+
+    /**
+     * Id da zona de um ponto de embarque de aluno.
+     */
+    public static String zoneIdPontoEmbarque(
+            String viagemId, String alunoId, PontoEmbarque.TipoEmbarque tipo) {
+        return prefixoZonasPontoEmbarque(viagemId) + alunoId + ":" + tipo;
+    }
+
+    /**
+     * Descarta as zonas registradas para uma viagem. O registro e refeito a cada posicao
+     * processada, entao limpar no fim da viagem nao desliga o geofence de uma viagem ativa
+     * e limita o crescimento do mapa.
+     */
+    public void removerZonasDaViagem(String viagemId) {
+        String prefixoPonto = prefixoZonasPontoRota(viagemId);
+        String prefixoAluno = prefixoZonasPontoEmbarque(viagemId);
+        zones.keySet().removeIf(id -> id.startsWith(prefixoPonto) || id.startsWith(prefixoAluno));
+    }
+
+    private static String prefixoZonasPontoRota(String viagemId) {
+        return "ponto:" + viagemId + ":";
+    }
+
+    private static String prefixoZonasPontoEmbarque(String viagemId) {
+        return "aluno:" + viagemId + ":";
+    }
 
     public void registerZone(String zoneId, double centerLat, double centerLng, double radiusMeters) {
         zones.put(zoneId, new GeofenceZone(centerLat, centerLng, radiusMeters));

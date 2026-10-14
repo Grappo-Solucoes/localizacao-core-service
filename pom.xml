@@ -33,13 +33,6 @@
 			<artifactId>spring-boot-starter-websocket</artifactId>
 		</dependency>
 
-		<!-- Firebase Admin -->
-		<dependency>
-			<groupId>com.google.firebase</groupId>
-			<artifactId>firebase-admin</artifactId>
-			<version>9.2.0</version>
-		</dependency>
-
 		<!-- Kafka: entrada do stream de posicoes do tracking-ingestion-service -->
 		<dependency>
 			<groupId>org.springframework.kafka</groupId>

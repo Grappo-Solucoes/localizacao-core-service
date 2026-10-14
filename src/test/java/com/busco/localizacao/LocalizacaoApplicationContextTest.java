@@ -1,8 +1,9 @@
 package com.busco.localizacao;
 
 import com.busco.localizacao.domain.services.TrackingOrchestratorService;
-import com.busco.localizacao.infra.firebase.FirebaseTimestampParser;
-import com.busco.localizacao.infra.firebase.FirebaseTrackingListener;
+import com.busco.localizacao.infra.kafka.PosicaoAlunoKafkaListener;
+import com.busco.localizacao.infra.kafka.PosicaoVeiculoKafkaListener;
+import com.busco.localizacao.infra.redis.EventoProcessadoRepository;
 import com.busco.localizacao.infra.ws.VisaoGeralScheduler;
 import com.busco.localizacao.infra.ws.VisaoGeralSnapshotPublisher;
 import com.busco.localizacao.infra.ws.VisaoGeralTopicTracker;
@@ -14,13 +15,16 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Teste de contexto Spring real.
  *
- * Carrega o contexto completo da aplicação com H2 e mocks das dependências
- * externas (Redis, Rabbit, Firebase) para validar wiring de beans.
+ * <p>Carrega o contexto completo com H2 e mocka a borda de processamento (o orquestrador) para
+ * validar o wiring: entrada pelos listeners Kafka, repositorios, publisher STOMP e ObjectMapper.
+ * Nao exige broker Kafka nem credencial de Firebase: no perfil de teste os listeners nao sobem
+ * (`spring.kafka.listener.auto-startup=false`).</p>
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -33,7 +37,13 @@ class LocalizacaoApplicationContextTest {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private FirebaseTimestampParser firebaseTimestampParser;
+    private PosicaoVeiculoKafkaListener posicaoVeiculoKafkaListener;
+
+    @Autowired
+    private PosicaoAlunoKafkaListener posicaoAlunoKafkaListener;
+
+    @Autowired
+    private EventoProcessadoRepository eventoProcessadoRepository;
 
     @MockBean
     private TrackingOrchestratorService trackingOrchestratorService;
@@ -45,18 +55,21 @@ class LocalizacaoApplicationContextTest {
     }
 
     @Test
-    void beanFirebaseTimestampParserExiste() {
-        assertNotNull(firebaseTimestampParser);
+    void beansDeEntradaPeloKafkaExistem() {
+        assertNotNull(posicaoVeiculoKafkaListener);
+        assertNotNull(posicaoAlunoKafkaListener);
+        assertTrue(context.containsBean("posicaoVeiculoKafkaListener"));
+        assertTrue(context.containsBean("posicaoAlunoKafkaListener"));
+    }
+
+    @Test
+    void beanEventoProcessadoRepositoryExiste() {
+        assertNotNull(eventoProcessadoRepository);
     }
 
     @Test
     void beanObjectMapperExiste() {
         assertNotNull(objectMapper);
-    }
-
-    @Test
-    void beanFirebaseTrackingListenerExiste() {
-        assertTrue(context.containsBean("firebaseTrackingListener"));
     }
 
     @Test
@@ -72,11 +85,5 @@ class LocalizacaoApplicationContextTest {
     @Test
     void beanVisaoGeralTopicTrackerExiste() {
         assertTrue(context.containsBean("visaoGeralTopicTracker"));
-    }
-
-    @Test
-    void parserIntegradoAoContextoFunciona() {
-        long timestamp = firebaseTimestampParser.parse("2026/10/14 10:30:00");
-        assertTrue(timestamp > 0);
     }
 }

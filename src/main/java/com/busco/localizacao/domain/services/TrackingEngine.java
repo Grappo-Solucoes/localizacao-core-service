@@ -38,15 +38,17 @@ public class TrackingEngine {
 
         return repository
                 .find(key)
-                .flatMap(state -> processWithState(
-                        key,
-                        state,
-                        lat,
-                        lng,
-                        timestamp
-                ))
-                .switchIfEmpty(
-                        createFirstState(key, lat, lng, timestamp)
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty())
+                .flatMap(optState -> optState
+                        .map(state -> processWithState(
+                                key,
+                                state,
+                                lat,
+                                lng,
+                                timestamp
+                        ))
+                        .orElseGet(() -> createFirstState(key, lat, lng, timestamp))
                 );
     }
 

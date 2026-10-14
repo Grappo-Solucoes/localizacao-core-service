@@ -82,7 +82,7 @@ public class TrackingOrchestratorService {
         return trackingEngine.getLastPosition(key)
                 .flatMap(optionalState -> {
                     if (optionalState.isEmpty()) {
-                        return Mono.just(optionalState);
+                        return Mono.just(true);
                     }
 
                     TrackingState previousTracking = optionalState.get();
@@ -93,12 +93,14 @@ public class TrackingOrchestratorService {
                             previousTracking.getLastTimestamp()
                     );
 
+                    // Posição inconsistente (timestamp não avança) é descartada:
+                    // retorna vazio para interromper o pipeline sem emitir evento.
                     if (!consistencyService.isValid(previousPosition, current)) {
-                        return Mono.empty(); // evento inconsistente
+                        return Mono.empty();
                     }
-                    return Mono.just(optionalState);
+                    return Mono.just(true);
                 })
-                .then(trackingEngine.process(key, lat, lng, timestamp))
+                .flatMap(ignored -> trackingEngine.process(key, lat, lng, timestamp))
                 .flatMap(result -> {
                     // Verifica anti-fraude
                     Position pos = new Position(new GeoPoint(lat, lng), result.speed(), timestamp);

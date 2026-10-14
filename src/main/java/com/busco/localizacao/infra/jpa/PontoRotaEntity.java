@@ -31,6 +31,12 @@ public class PontoRotaEntity {
     @Column(name = "horario_chegada")
     private Instant horarioChegada;
 
+    @Column(name = "horario_previsto")
+    private Instant horarioPrevisto;
+
+    @Column(name = "tempo_parada")
+    private Integer tempoParada;
+
     @Column(name = "ordem")
     private int ordem;
 
@@ -52,6 +58,10 @@ public class PontoRotaEntity {
     public void setVisitado(boolean visitado) { this.visitado = visitado; }
     public Instant getHorarioChegada() { return horarioChegada; }
     public void setHorarioChegada(Instant horarioChegada) { this.horarioChegada = horarioChegada; }
+    public Instant getHorarioPrevisto() { return horarioPrevisto; }
+    public void setHorarioPrevisto(Instant horarioPrevisto) { this.horarioPrevisto = horarioPrevisto; }
+    public Integer getTempoParada() { return tempoParada; }
+    public void setTempoParada(Integer tempoParada) { this.tempoParada = tempoParada; }
     public int getOrdem() { return ordem; }
     public void setOrdem(int ordem) { this.ordem = ordem; }
 }

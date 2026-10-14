@@ -37,6 +37,21 @@ public class FirebaseAlunoListener {
                 FirebaseDatabase.getInstance(firebaseApp)
                         .getReference("viagens");
 
+        registrarListeners(ref);
+
+        scheduler.scheduleAtFixedRate(() -> {
+            listeners.clear();
+        }, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MINUTES, TimeUnit.MINUTES);
+    }
+
+    /**
+     * Registra os listeners de aluno a partir do nó raiz {@code viagens}.
+     * Usa {@link ValueEventListener} sobre {@code alunos/{alunoId}/ultima}, que dispara
+     * tanto em criação ({@code onChildAdded}) quanto em atualização ({@code onChildChanged}),
+     * pois o {@code busco-app} grava o nó com {@code set} (não {@code push}).
+     */
+    void registrarListeners(DatabaseReference ref) {
+
         ref.addChildEventListener(new ChildEventListener() {
 
             @Override
@@ -102,9 +117,9 @@ public class FirebaseAlunoListener {
             @Override
             public void onCancelled(DatabaseError error) {}
         });
+    }
 
-        scheduler.scheduleAtFixedRate(() -> {
-            listeners.clear();
-        }, REFRESH_INTERVAL_MINUTES, REFRESH_INTERVAL_MINUTES, TimeUnit.MINUTES);
+    Map<String, ValueEventListener> getListeners() {
+        return listeners;
     }
 }

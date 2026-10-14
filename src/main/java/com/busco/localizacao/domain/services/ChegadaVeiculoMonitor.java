@@ -89,7 +89,8 @@ public class ChegadaVeiculoMonitor {
         for (PontoEmbarqueEntity ponto : pontos) {
             String chave = ponto.getLatitude() + "," + ponto.getLongitude();
             PontoChegada pontoChegada = pontosPorChave.computeIfAbsent(chave,
-                    k -> new PontoChegada(chave, ponto.getLatitude(), ponto.getLongitude()));
+                    k -> new PontoChegada(k, ponto.getId(), ponto.getNome(),
+                            ponto.getLatitude(), ponto.getLongitude()));
             pontoChegada.addAluno(ponto.getAlunoId());
         }
 
@@ -142,8 +143,8 @@ public class ChegadaVeiculoMonitor {
             }
         }
 
-        private void removerPonto(String idPonto) {
-            pontos.removeIf(p -> p.getId().equals(idPonto));
+        private void removerPonto(String chave) {
+            pontos.removeIf(p -> p.getChave().equals(chave));
         }
 
         private void destruir() {
@@ -163,14 +164,14 @@ public class ChegadaVeiculoMonitor {
 
     private void notificarPonto(Monitoragem monitor, PontoChegada ponto) {
         int raioMetros = (int) Math.round(raioChegadaMetros);
-        log.info("Chegada notificada no ponto {} da viagem {} ({} alunos)",
-                ponto.getId(), monitor.getViagemId(), ponto.getAlunos().size());
-        monitor.removerPonto(ponto.getId());
+        log.info("Chegada notificada no ponto {} ({}) da viagem {} ({} alunos)",
+                ponto.getPontoId(), ponto.getChave(), monitor.getViagemId(), ponto.getAlunos().size());
+        monitor.removerPonto(ponto.getChave());
 
         ViagemChegadaEvent event = new ViagemChegadaEvent(
                 monitor.getViagemId(),
-                ponto.getId(),
-                ponto.getId(),
+                ponto.getPontoId(),
+                ponto.getPontoNome(),
                 ponto.getLatitude(),
                 ponto.getLongitude(),
                 System.currentTimeMillis(),
@@ -184,19 +185,26 @@ public class ChegadaVeiculoMonitor {
     }
 
     private static class PontoChegada {
-        private final String id;
+        private final String chave;
+        private final String pontoId;
+        private final String pontoNome;
         private final double latitude;
         private final double longitude;
         private final Set<String> alunos = new HashSet<>();
 
-        private PontoChegada(String id, double latitude, double longitude) {
-            this.id = id;
+        private PontoChegada(String chave, String pontoId, String pontoNome,
+                             double latitude, double longitude) {
+            this.chave = chave;
+            this.pontoId = pontoId;
+            this.pontoNome = pontoNome;
             this.latitude = latitude;
             this.longitude = longitude;
         }
 
         private void addAluno(String alunoId) { alunos.add(alunoId); }
-        private String getId() { return id; }
+        private String getChave() { return chave; }
+        private String getPontoId() { return pontoId; }
+        private String getPontoNome() { return pontoNome; }
         private double getLatitude() { return latitude; }
         private double getLongitude() { return longitude; }
         private Set<String> getAlunos() { return alunos; }

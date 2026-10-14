@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS localizacao.ponto_rota (
     longitude DOUBLE PRECISION NOT NULL,
     tipo VARCHAR(32) NOT NULL,
     visitado BOOLEAN NOT NULL DEFAULT FALSE,
+    horario_previsto TIMESTAMP,
     horario_chegada TIMESTAMP,
+    tempo_parada INTEGER,
     ordem INTEGER NOT NULL DEFAULT 0
 );
 
